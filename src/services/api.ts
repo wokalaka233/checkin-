@@ -25,23 +25,41 @@ export const setAuthToken = (token: string | null) => {
 
 export const getAuthToken = () => authToken;
 
-// Local storage helper keys for offline/fallback mode
+// Local storage keys
 const LS_FRIENDS_KEY = 'daka_local_friends';
 const LS_REQUESTS_KEY = 'daka_local_friend_requests';
+const LS_REGISTERED_USERS_KEY = 'daka_local_registered_users';
 const LS_PROJECTS_KEY = 'daka_local_projects';
 const LS_MESSAGES_KEY = 'daka_local_messages';
 
-const getLocalFriends = (): FriendUser[] => {
+// 获取所有真实存在的用户库（含系统内置与新注册的用户）
+const getKnownUsers = (): User[] => {
   try {
-    const raw = localStorage.getItem(LS_FRIENDS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const raw = localStorage.getItem(LS_REGISTERED_USERS_KEY);
+    const users: User[] = raw ? JSON.parse(raw) : [];
+    const defaultUsers: User[] = [
+      { id: 'u_user1', username: 'user1', nickname: '打卡先锋', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=user1', createdAt: new Date().toISOString(), role: 'user', isAdmin: false },
+      { id: 'u_user2', username: 'user2', nickname: '晨跑小鹿', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=user2', createdAt: new Date().toISOString(), role: 'user', isAdmin: false },
+      { id: 'u_user3', username: 'user3', nickname: '读书伴侣', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=user3', createdAt: new Date().toISOString(), role: 'user', isAdmin: false },
+      { id: 'u_admin', username: 'admin', nickname: '系统管理员', avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=admin', createdAt: new Date().toISOString(), role: 'admin', isAdmin: true },
+    ];
+    defaultUsers.forEach(du => {
+      if (!users.some(u => u.username.toLowerCase() === du.username.toLowerCase())) {
+        users.push(du);
+      }
+    });
+    return users;
   } catch {
     return [];
   }
 };
 
-const setLocalFriends = (friends: FriendUser[]) => {
-  localStorage.setItem(LS_FRIENDS_KEY, JSON.stringify(friends));
+const saveUserToKnown = (user: User) => {
+  const current = getKnownUsers();
+  if (!current.some(u => u.username.toLowerCase() === user.username.toLowerCase())) {
+    current.push(user);
+    localStorage.setItem(LS_REGISTERED_USERS_KEY, JSON.stringify(current));
+  }
 };
 
 const getLocalRequests = (): (FriendRequest & { fromUser: User })[] => {
@@ -53,7 +71,7 @@ const getLocalRequests = (): (FriendRequest & { fromUser: User })[] => {
   }
 };
 
-const setLocalRequests = (reqs: (FriendRequest & { fromUser: User })[]) => {
+const setAllRequests = (reqs: (FriendRequest & { fromUser: User })[]) => {
   localStorage.setItem(LS_REQUESTS_KEY, JSON.stringify(reqs));
 };
 
@@ -106,6 +124,7 @@ export const api = {
         isAdmin: false,
       };
       const token = 'token_' + data.username;
+      saveUserToKnown(user);
       setAuthToken(token);
       return { user, token };
     }
@@ -138,6 +157,7 @@ export const api = {
         isAdmin: isSpecialAdmin,
       };
       const token = 'token_' + data.username;
+      saveUserToKnown(user);
       setAuthToken(token);
       return { user, token };
     }
@@ -193,13 +213,16 @@ export const api = {
     }
   },
 
-  // Friends - 真实好友列表，默认为空，不展示未经添加的测试账号
+  // Friends - 真实好友列表
   getFriends: async (): Promise<FriendUser[]> => {
     try {
       const res = await request<FriendUser[]>('/api/friends/list');
       return Array.isArray(res) ? res : [];
     } catch {
-      return getLocalFriends();
+      const token = getAuthToken();
+      const myUsername = token ? token.replace('token_', '') : 'user1';
+      const raw = localStorage.getItem(`${LS_FRIENDS_KEY}_${myUsername}`);
+      return raw ? JSON.parse(raw) : [];
     }
   },
 
@@ -208,7 +231,12 @@ export const api = {
       const res = await request<(FriendRequest & { fromUser: User })[]>('/api/friends/requests');
       return Array.isArray(res) ? res : [];
     } catch {
-      return getLocalRequests();
+      const token = getAuthToken();
+      const myUsername = token ? token.replace('token_', '') : 'user1';
+      const myId = 'u_' + myUsername;
+      const all = getLocalRequests();
+      // 只筛选发给当前用户的待处理申请
+      return all.filter((r) => r.toUserId === myId && r.status === 'pending');
     }
   },
 
@@ -221,22 +249,56 @@ export const api = {
     } catch {
       const token = getAuthToken() || 'token_user1';
       const myUsername = token.replace('token_', '');
+      
+      if (toUsername.toLowerCase() === myUsername.toLowerCase()) {
+        throw new Error('不能向自己发送好友申请');
+      }
+
+      // 严格检查目标用户是否存在
+      const knownUsers = getKnownUsers();
+      const target = knownUsers.find((u) => u.username.toLowerCase() === toUsername.trim().toLowerCase());
+      if (!target) {
+        throw new Error(`用户 @${toUsername} 不存在，请核对账号`);
+      }
+
+      // 检查是否已经是好友
+      const myFriendsRaw = localStorage.getItem(`${LS_FRIENDS_KEY}_${myUsername}`);
+      const myFriends: FriendUser[] = myFriendsRaw ? JSON.parse(myFriendsRaw) : [];
+      if (myFriends.some((f) => f.username.toLowerCase() === toUsername.toLowerCase())) {
+        throw new Error(`您和 @${target.nickname || target.username} 已经是好友了`);
+      }
+
+      const currentReqs = getLocalRequests();
+      const existing = currentReqs.find(
+        (r) =>
+          r.fromUserId === 'u_' + myUsername &&
+          r.toUserId === target.id &&
+          r.status === 'pending'
+      );
+      if (existing) {
+        throw new Error('已发送过好友申请，请等待对方同意');
+      }
+
+      const me = knownUsers.find((u) => u.username.toLowerCase() === myUsername.toLowerCase()) || {
+        id: 'u_' + myUsername,
+        username: myUsername,
+        nickname: myUsername,
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${myUsername}`,
+        createdAt: new Date().toISOString(),
+        role: 'user',
+        isAdmin: false,
+      };
+
       const req: FriendRequest & { fromUser: User } = {
         id: 'req_' + Date.now(),
         fromUserId: 'u_' + myUsername,
-        toUserId: 'u_' + toUsername,
+        toUserId: target.id,
         status: 'pending',
         createdAt: new Date().toISOString(),
-        fromUser: {
-          id: 'u_' + myUsername,
-          username: myUsername,
-          nickname: myUsername,
-          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${myUsername}`,
-          createdAt: new Date().toISOString(),
-        },
+        fromUser: me,
       };
-      const currentReqs = getLocalRequests();
-      setLocalRequests([...currentReqs, req]);
+
+      setAllRequests([...currentReqs, req]);
       return req;
     }
   },
@@ -248,18 +310,47 @@ export const api = {
         body: JSON.stringify({ requestId, action }),
       });
     } catch {
+      const token = getAuthToken() || 'token_user1';
+      const myUsername = token.replace('token_', '');
       const currentReqs = getLocalRequests();
       const targetReq = currentReqs.find((r) => r.id === requestId);
-      setLocalRequests(currentReqs.filter((r) => r.id !== requestId));
+      
+      setAllRequests(currentReqs.filter((r) => r.id !== requestId));
 
-      if (action === 'accept' && targetReq?.fromUser) {
-        const currentFriends = getLocalFriends();
-        const newFriend: FriendUser = {
+      if (action === 'accept' && targetReq) {
+        const fromUser = targetReq.fromUser;
+        const fromUsername = fromUser.username;
+        
+        // 1. 给接收方添加好友
+        const myFriendsRaw = localStorage.getItem(`${LS_FRIENDS_KEY}_${myUsername}`);
+        const myFriends: FriendUser[] = myFriendsRaw ? JSON.parse(myFriendsRaw) : [];
+        const newFriendForMe: FriendUser = {
           ...targetReq.fromUser,
           unreadCount: 0,
         };
-        if (!currentFriends.some((f) => f.id === newFriend.id)) {
-          setLocalFriends([...currentFriends, newFriend]);
+        if (!myFriends.some((f) => f.id === newFriendForMe.id)) {
+          localStorage.setItem(`${LS_FRIENDS_KEY}_${myUsername}`, JSON.stringify([...myFriends, newFriendForMe]));
+        }
+
+        // 2. 给发起方添加好友（形成双向好友）
+        const knownUsers = getKnownUsers();
+        const me = knownUsers.find((u) => u.username.toLowerCase() === myUsername.toLowerCase()) || {
+          id: 'u_' + myUsername,
+          username: myUsername,
+          nickname: myUsername,
+          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${myUsername}`,
+          createdAt: new Date().toISOString(),
+          role: 'user',
+          isAdmin: false,
+        };
+        const senderFriendsRaw = localStorage.getItem(`${LS_FRIENDS_KEY}_${fromUsername}`);
+        const senderFriends: FriendUser[] = senderFriendsRaw ? JSON.parse(senderFriendsRaw) : [];
+        const newFriendForSender: FriendUser = {
+          ...me,
+          unreadCount: 0,
+        };
+        if (!senderFriends.some((f) => f.id === newFriendForSender.id)) {
+          localStorage.setItem(`${LS_FRIENDS_KEY}_${fromUsername}`, JSON.stringify([...senderFriends, newFriendForSender]));
         }
       }
       return { success: true };
@@ -270,15 +361,19 @@ export const api = {
     try {
       return await request<User[]>(`/api/friends/search?q=${encodeURIComponent(q)}`);
     } catch {
-      return [
-        {
-          id: 'u_' + q,
-          username: q,
-          nickname: q,
-          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${q}`,
-          createdAt: new Date().toISOString(),
-        },
-      ];
+      const token = getAuthToken() || 'token_user1';
+      const myUsername = token.replace('token_', '');
+      const cleanQ = q.trim().toLowerCase();
+      if (!cleanQ) return [];
+
+      const knownUsers = getKnownUsers();
+      const matched = knownUsers.filter(
+        (u) =>
+          u.username.toLowerCase().includes(cleanQ) ||
+          (u.nickname && u.nickname.toLowerCase().includes(cleanQ))
+      );
+      // 排除自己，只返回匹配到的真实用户
+      return matched.filter((u) => u.username.toLowerCase() !== myUsername.toLowerCase());
     }
   },
 
