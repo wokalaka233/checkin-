@@ -1,6 +1,10 @@
 name = "daka-app"
+main = "server.ts"
 compatibility_date = "2024-04-01"
-pages_build_output_dir = "dist"
+compatibility_flags = ["nodejs_compat"]
+
+[site]
+bucket = "./dist"
 
 # ============================================================
 # Cloudflare D1 数据库配置
