@@ -29,6 +29,7 @@ export const getAuthToken = () => authToken;
 const LS_FRIENDS_KEY = 'daka_local_friends';
 const LS_REQUESTS_KEY = 'daka_local_friend_requests';
 const LS_REGISTERED_USERS_KEY = 'daka_local_registered_users';
+const LS_CHECKINS_KEY = 'daka_local_checkins';
 const LS_PROJECTS_KEY = 'daka_local_projects';
 const LS_MESSAGES_KEY = 'daka_local_messages';
 
@@ -235,7 +236,6 @@ export const api = {
       const myUsername = token ? token.replace('token_', '') : 'user1';
       const myId = 'u_' + myUsername;
       const all = getLocalRequests();
-      // 只筛选发给当前用户的待处理申请
       return all.filter((r) => r.toUserId === myId && r.status === 'pending');
     }
   },
@@ -372,7 +372,6 @@ export const api = {
           u.username.toLowerCase().includes(cleanQ) ||
           (u.nickname && u.nickname.toLowerCase().includes(cleanQ))
       );
-      // 排除自己，只返回匹配到的真实用户
       return matched.filter((u) => u.username.toLowerCase() !== myUsername.toLowerCase());
     }
   },
@@ -489,21 +488,53 @@ export const api = {
   getCalendarData: async (projectId: string, month: string) => {
     try {
       return await request<any>(`/api/checkins/calendar?projectId=${encodeURIComponent(projectId)}&month=${encodeURIComponent(month)}`);
-    } catch {
-      const proj = (await api.getProjects()).find((p) => p.id === projectId) || {
-        id: projectId,
-        title: '每日打卡',
-        members: [],
-        sparks: {},
-        rules: { requirePhotos: false, minPhotos: 0, requireVideo: false, requireAudio: false, requireText: false },
-        createdAt: new Date().toISOString(),
-      };
-      return {
-        month,
-        project: proj,
-        days: {},
-      };
+    } catch (e) {
+      console.warn('Calendar API fallback to local data', e);
     }
+
+    const token = getAuthToken() || 'token_user1';
+    const myUsername = token.replace('token_', '');
+    const myId = 'u_' + myUsername;
+
+    const projects = await api.getProjects();
+    const proj = projects.find((p) => p.id === projectId) || projects[0] || {
+      id: projectId,
+      title: '每日自律打卡',
+      creatorId: myId,
+      creatorNickname: myUsername,
+      members: [myId],
+      sparks: { [myId]: 1 },
+      rules: { requirePhotos: false, minPhotos: 0, requireVideo: false, requireAudio: false, requireText: false },
+      createdAt: new Date().toISOString(),
+    };
+
+    let allCheckIns: CheckInRecord[] = [];
+    try {
+      allCheckIns = JSON.parse(localStorage.getItem(LS_CHECKINS_KEY) || '[]');
+    } catch {}
+
+    const days: Record<string, any> = {};
+    const projRecords = allCheckIns.filter((r) => r.projectId === projectId && r.date.startsWith(month));
+
+    projRecords.forEach((rec) => {
+      if (!days[rec.date]) {
+        days[rec.date] = {
+          date: rec.date,
+          status: rec.isQualified ? 'red' : 'yellow',
+          records: [rec],
+          allQualified: rec.isQualified,
+          hasAnySubmission: true,
+          hasMySubmission: rec.userId === myId,
+          isMyQualified: rec.userId === myId && rec.isQualified,
+        };
+      }
+    });
+
+    return {
+      month,
+      project: proj,
+      days,
+    };
   },
 
   submitCheckIn: async (data: {
@@ -522,19 +553,29 @@ export const api = {
     } catch {
       const token = getAuthToken() || 'token_user1';
       const myUsername = token.replace('token_', '');
+      const myId = 'u_' + myUsername;
       const record: CheckInRecord = {
         id: 'rec_' + Date.now(),
         projectId: data.projectId,
-        userId: 'u_' + myUsername,
+        userId: myId,
         userNickname: myUsername,
         date: data.date,
         photos: data.photos,
         videos: data.videos,
         audios: data.audios,
         text: data.text,
-        isQualified: true,
+        isQualified: (data.photos?.length || 0) >= 1 || !!data.text,
         createdAt: new Date().toISOString(),
       };
+
+      try {
+        const existing = JSON.parse(localStorage.getItem(LS_CHECKINS_KEY) || '[]');
+        const filtered = existing.filter(
+          (r: CheckInRecord) => !(r.projectId === data.projectId && r.userId === myId && r.date === data.date)
+        );
+        localStorage.setItem(LS_CHECKINS_KEY, JSON.stringify([...filtered, record]));
+      } catch {}
+
       return {
         record,
         sparkUpdate: { newSpark: 2, isRekindling: false, rekindleProgress: 0 },
