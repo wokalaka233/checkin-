@@ -1,0 +1,6 @@
+{
+  "name": "多媒体日历打卡与好友私聊系统",
+  "description": "极简纯粹的多媒体日历打卡、好友关系与1v1站内私聊系统",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
