@@ -1,12 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { X, User, Users, Check, Camera, Video, Mic, FileText, AlertCircle, Bell } from 'lucide-react';
-import { FriendUser, CheckInRule } from '../../types';
+import { HabitProject, FriendUser, CheckInRule } from '../../types';
 import { api } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
+import {
+  X,
+  Users,
+  Check,
+  Bell,
+  Clock,
+  Sparkles,
+  Camera,
+  Video,
+  Mic,
+  FileText,
+  HelpCircle
+} from 'lucide-react';
 
 interface ProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (newProjectId: string) => void;
+  onSuccess: (project: HabitProject) => void;
 }
 
 export const ProjectModal: React.FC<ProjectModalProps> = ({
@@ -14,218 +27,217 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   onClose,
   onSuccess,
 }) => {
-  const [creationType, setCreationType] = useState<'mine' | 'proxy'>('mine');
+  const { user } = useAuth();
   const [title, setTitle] = useState('');
+  const [isProxy, setIsProxy] = useState(false);
   const [friends, setFriends] = useState<FriendUser[]>([]);
   const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
   const [creatorParticipates, setCreatorParticipates] = useState(true);
-  const [loadingFriends, setLoadingFriends] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [fetchingFriends, setFetchingFriends] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Rules state
+  // Rules
   const [requirePhotos, setRequirePhotos] = useState(true);
   const [minPhotos, setMinPhotos] = useState(1);
   const [requireVideo, setRequireVideo] = useState(false);
   const [requireAudio, setRequireAudio] = useState(false);
   const [requireText, setRequireText] = useState(true);
-  const [ruleNote, setRuleNote] = useState('');
-
-  // Creator Custom Reminder state
   const [reminderEnabled, setReminderEnabled] = useState(true);
   const [reminderTime, setReminderTime] = useState('21:00');
-  const [reminderMessage, setReminderMessage] = useState('【{nickname}】，您参与的项目【{projectTitle}】今天还没有打卡哦，快去完成吧！');
 
   useEffect(() => {
     if (isOpen) {
-      setError('');
+      loadFriends();
       setTitle('');
+      setIsProxy(false);
       setSelectedFriendIds([]);
-      setCreationType('mine');
-      setReminderEnabled(true);
-      setReminderTime('21:00');
-      setReminderMessage('【{nickname}】，您参与的项目【{projectTitle}】今天还没有打卡哦，快去完成吧！');
-      setLoadingFriends(true);
-      api
-        .getFriends()
-        .then((list) => setFriends(list))
-        .catch(() => setFriends([]))
-        .finally(() => setLoadingFriends(false));
+      setCreatorParticipates(true);
+      setError(null);
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  const loadFriends = async () => {
+    setFetchingFriends(true);
+    try {
+      const list = await api.getFriends();
+      setFriends(list);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setFetchingFriends(false);
+    }
+  };
 
   const handleToggleFriend = (friendId: string) => {
-    setSelectedFriendIds((prev) =>
-      prev.includes(friendId)
-        ? prev.filter((id) => id !== friendId)
-        : [...prev, friendId]
-    );
+    if (selectedFriendIds.includes(friendId)) {
+      setSelectedFriendIds(selectedFriendIds.filter((id) => id !== friendId));
+    } else {
+      setSelectedFriendIds([...selectedFriendIds, friendId]);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-
     if (!title.trim()) {
       setError('请输入打卡项目名称');
       return;
     }
 
-    if (creationType === 'proxy' && selectedFriendIds.length === 0) {
-      setError('代创建打卡必须勾选至少一位好友');
+    if (selectedFriendIds.length === 0 && !creatorParticipates) {
+      setError('必须至少选择一位打卡成员或本人参与打卡');
       return;
     }
 
-    setSubmitting(true);
-    try {
-      const rules: CheckInRule = {
-        requirePhotos,
-        minPhotos: requirePhotos ? minPhotos : 0,
-        requireVideo,
-        requireAudio,
-        requireText,
-        note: ruleNote.trim(),
-        reminderEnabled,
-        reminderTime,
-        reminderMessage: reminderMessage.trim(),
-      };
+    setLoading(true);
+    setError(null);
 
+    const rules: CheckInRule = {
+      requirePhotos,
+      minPhotos: requirePhotos ? minPhotos : 0,
+      requireVideo,
+      requireAudio,
+      requireText,
+      reminderEnabled,
+      reminderTime: reminderEnabled ? reminderTime : undefined,
+    };
+
+    try {
       const project = await api.createProject({
         title: title.trim(),
-        isProxy: creationType === 'proxy',
+        isProxy,
         selectedFriendIds,
-        creatorParticipates: creationType === 'proxy' ? creatorParticipates : true,
+        creatorParticipates,
         rules,
       });
-
-      onSuccess(project.id);
+      onSuccess(project);
       onClose();
     } catch (err: any) {
-      setError(err.message || '创建打卡项目失败');
+      setError(err.message || '创建项目失败，请重试');
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   };
 
-  const hasNoFriends = friends.length === 0;
+  if (!isOpen) return null;
 
   return (
-    <div
-      id="project-modal-backdrop"
-      className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4"
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-stone-900/60 backdrop-blur-sm animate-in fade-in duration-200">
       <div
-        id="project-modal-card"
-        className="w-full max-w-lg bg-white rounded-2xl border border-stone-200 shadow-xl overflow-hidden max-h-[90vh] flex flex-col"
+        className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200"
+        onClick={(e) => e.stopPropagation()}
       >
-        {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-stone-100">
-          <h2 className="text-base font-bold text-stone-900">创建打卡项目</h2>
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-5 border-b border-stone-100 bg-stone-50/50">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-stone-900 text-white rounded-xl">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-stone-900">新建自律打卡项目</h2>
+              <p className="text-xs text-stone-500">创建专属打卡规则与火苗契约</p>
+            </div>
+          </div>
           <button
-            id="btn-close-project-modal"
-            type="button"
             onClick={onClose}
-            className="p-1 text-stone-400 hover:text-stone-700 rounded-lg transition-colors"
+            className="p-2 text-stone-400 hover:text-stone-700 rounded-full hover:bg-stone-100 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Scrollable body */}
-        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 flex-1">
+        {/* Content Form */}
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
           {error && (
-            <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              <span>{error}</span>
+            <div className="p-3 text-xs bg-rose-50 border border-rose-200 text-rose-600 rounded-xl">
+              {error}
             </div>
           )}
 
-          {/* Creation type tabs */}
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              id="btn-opt-mine"
-              type="button"
-              onClick={() => setCreationType('mine')}
-              className={`p-3 rounded-xl border text-left flex items-start gap-2.5 transition-all ${
-                creationType === 'mine'
-                  ? 'border-stone-900 bg-stone-900 text-white shadow-xs'
-                  : 'border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-800'
-              }`}
-            >
-              <User className="w-4 h-4 mt-0.5" />
-              <div>
-                <div className="text-xs font-bold">创建我的打卡</div>
-                <div
-                  className={`text-[11px] mt-0.5 ${
-                    creationType === 'mine' ? 'text-stone-300' : 'text-stone-500'
-                  }`}
-                >
-                  个人专属习惯
-                </div>
-              </div>
-            </button>
-
-            <button
-              id="btn-opt-proxy"
-              type="button"
-              disabled={hasNoFriends}
-              onClick={() => !hasNoFriends && setCreationType('proxy')}
-              className={`p-3 rounded-xl border text-left flex items-start gap-2.5 transition-all ${
-                hasNoFriends
-                  ? 'opacity-40 bg-stone-100 border-stone-200 cursor-not-allowed text-stone-400'
-                  : creationType === 'proxy'
-                  ? 'border-stone-900 bg-stone-900 text-white shadow-xs'
-                  : 'border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-800'
-              }`}
-            >
-              <Users className="w-4 h-4 mt-0.5" />
-              <div>
-                <div className="text-xs font-bold">代创建打卡</div>
-                <div
-                  className={`text-[11px] mt-0.5 ${
-                    hasNoFriends
-                      ? 'text-stone-400'
-                      : creationType === 'proxy'
-                      ? 'text-stone-300'
-                      : 'text-stone-500'
-                  }`}
-                >
-                  {hasNoFriends ? '无好友置灰不可用' : '为好友/小队创建'}
-                </div>
-              </div>
-            </button>
-          </div>
-
           {/* Project Title */}
           <div>
-            <label className="block text-xs font-medium text-stone-700 mb-1.5">
-              打卡项目名称
+            <label className="block text-xs font-semibold text-stone-700 mb-1.5">
+              项目名称 *
             </label>
             <input
-              id="input-project-title"
               type="text"
+              required
+              placeholder="例如：每日晨跑 5 公里 / 英语单词 50 个"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="例如：每日晨读打卡、30天健身挑战"
-              required
-              className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-200 rounded-xl text-stone-900 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900 focus:bg-white transition-all"
+              className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-stone-900 placeholder:text-stone-400 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900 focus:bg-white transition-all"
             />
           </div>
 
-          {/* Proxy Options: Friends Selection & Creator Participation */}
-          {creationType === 'proxy' && (
-            <div className="space-y-3 p-4 bg-stone-50 rounded-xl border border-stone-200">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-stone-800">
-                  选择打卡成员 (多选)
-                </span>
-                <span className="text-[11px] text-stone-500">
-                  已选择 {selectedFriendIds.length} 位
+          {/* Mode Selector: Self vs Proxy */}
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => setIsProxy(false)}
+              className={`p-3 rounded-2xl border text-left transition-all ${
+                !isProxy
+                  ? 'border-stone-900 bg-stone-900 text-white shadow-sm'
+                  : 'border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-700'
+              }`}
+            >
+              <div className="text-xs font-bold mb-0.5">普通打卡 / 组队打卡</div>
+              <div
+                className={`text-[10px] ${
+                  !isProxy ? 'text-stone-300' : 'text-stone-400'
+                }`}
+              >
+                自己打卡或与好友共同监督
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setIsProxy(true)}
+              className={`p-3 rounded-2xl border text-left transition-all ${
+                isProxy
+                  ? 'border-stone-900 bg-stone-900 text-white shadow-sm'
+                  : 'border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-700'
+              }`}
+            >
+              <div className="text-xs font-bold mb-0.5 flex items-center gap-1">
+                代理打卡模式
+                <span
+                  className={`text-[9px] px-1.5 py-0.2 rounded-full ${
+                    isProxy
+                      ? 'bg-amber-400 text-stone-900 font-bold'
+                      : 'bg-stone-200 text-stone-600'
+                  }`}
+                >
+                  专属
                 </span>
               </div>
+              <div
+                className={`text-[10px] ${
+                  isProxy ? 'text-stone-300' : 'text-stone-400'
+                }`}
+              >
+                帮他人或多成员代记打卡
+              </div>
+            </button>
+          </div>
 
+          {/* Member Selection if not purely solo */}
+          <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200/80 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-stone-700 flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-stone-500" />
+                选择打卡成员 (多选)
+              </label>
+              <span className="text-[10px] text-stone-400">
+                已选择 {selectedFriendIds.length} 位
+              </span>
+            </div>
+
+            {friends.length === 0 ? (
+              <div className="py-6 px-3 text-center text-xs text-stone-500 bg-white rounded-xl border border-stone-200">
+                暂无已添加的好友，请先在【好友与私聊】中添加好友
+              </div>
+            ) : (
               <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
                 {friends.map((friend) => {
                   const isSelected = selectedFriendIds.includes(friend.id);
@@ -242,7 +254,10 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                     >
                       <div className="flex items-center gap-2">
                         <img
-                          src={friend.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'}
+                          src={
+                            friend.avatar ||
+                            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'
+                          }
                           alt=""
                           className="w-6 h-6 rounded-full object-cover"
                         />
@@ -260,191 +275,162 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   );
                 })}
               </div>
+            )}
 
-              <div className="pt-2 border-t border-stone-200 flex items-center gap-2">
-                <input
-                  id="checkbox-creator-participates"
-                  type="checkbox"
-                  checked={creatorParticipates}
-                  onChange={(e) => setCreatorParticipates(e.target.checked)}
-                  className="w-4 h-4 rounded text-stone-900 focus:ring-stone-900 border-stone-300"
-                />
-                <label
-                  htmlFor="checkbox-creator-participates"
-                  className="text-xs text-stone-700 font-medium cursor-pointer"
-                >
-                  是否我也参与打卡 (勾选后全员完全同步可见)
-                </label>
-              </div>
-            </div>
-          )}
-
-          {/* Flexible Rules Setup */}
-          <div className="space-y-3">
-            <label className="block text-xs font-bold text-stone-800">
-              打卡要求配置
-            </label>
-
-            {/* Photos */}
-            <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-medium text-stone-800">
-                  <Camera className="w-4 h-4 text-stone-600" />
-                  <span>必须上传照片</span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={requirePhotos}
-                  onChange={(e) => setRequirePhotos(e.target.checked)}
-                  className="w-4 h-4 rounded text-stone-900 focus:ring-stone-900 border-stone-300"
-                />
-              </div>
-              {requirePhotos && (
-                <div className="flex items-center gap-2 text-xs text-stone-600 pl-6">
-                  <span>最少张数要求:</span>
-                  {[1, 2, 3, 4].map((num) => (
-                    <button
-                      key={num}
-                      type="button"
-                      onClick={() => setMinPhotos(num)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${
-                        minPhotos === num
-                          ? 'bg-stone-900 text-white border-stone-900'
-                          : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-100'
-                      }`}
-                    >
-                      {num} 张
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Video */}
-            <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs font-medium text-stone-800">
-                <Video className="w-4 h-4 text-stone-600" />
-                <span>必须上传视频</span>
-              </div>
+            <div className="pt-2 border-t border-stone-200 flex items-center gap-2">
               <input
                 type="checkbox"
-                checked={requireVideo}
-                onChange={(e) => setRequireVideo(e.target.checked)}
-                className="w-4 h-4 rounded text-stone-900 focus:ring-stone-900 border-stone-300"
+                id="creatorParticipates"
+                checked={creatorParticipates}
+                onChange={(e) => setCreatorParticipates(e.target.checked)}
+                className="w-4 h-4 text-stone-900 bg-stone-100 border-stone-300 rounded focus:ring-stone-900"
               />
-            </div>
-
-            {/* Audio */}
-            <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs font-medium text-stone-800">
-                <Mic className="w-4 h-4 text-stone-600" />
-                <span>必须录制语音</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={requireAudio}
-                onChange={(e) => setRequireAudio(e.target.checked)}
-                className="w-4 h-4 rounded text-stone-900 focus:ring-stone-900 border-stone-300"
-              />
-            </div>
-
-            {/* Text note */}
-            <div className="p-3 bg-stone-50 border border-stone-200 rounded-xl flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs font-medium text-stone-800">
-                <FileText className="w-4 h-4 text-stone-600" />
-                <span>必须填写打卡文字说明</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={requireText}
-                onChange={(e) => setRequireText(e.target.checked)}
-                className="w-4 h-4 rounded text-stone-900 focus:ring-stone-900 border-stone-300"
-              />
-            </div>
-
-            {/* Optional note */}
-            <div>
-              <input
-                type="text"
-                value={ruleNote}
-                onChange={(e) => setRuleNote(e.target.value)}
-                placeholder="补充规则备注（例如：需在22点前完成）"
-                className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-stone-900 text-xs focus:outline-none focus:ring-2 focus:ring-stone-900 focus:bg-white"
-              />
+              <label
+                htmlFor="creatorParticipates"
+                className="text-xs text-stone-600 select-none cursor-pointer"
+              >
+                是否我也参与打卡 (勾选后全员完全同步可见)
+              </label>
             </div>
           </div>
 
-          {/* Creator Custom Reminder Settings */}
-          <div className="space-y-3 pt-1 border-t border-stone-100">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <Bell className="w-4 h-4 text-emerald-600" />
-                <span className="text-xs font-bold text-stone-800">微信打卡提醒设置</span>
+          {/* Qualification Rules */}
+          <div className="space-y-3">
+            <label className="text-xs font-semibold text-stone-700 flex items-center justify-between">
+              <span>合格判定规则 (达标点亮红日历)</span>
+              <span className="text-[10px] text-stone-400 font-normal">满足即算打卡成功</span>
+            </label>
+
+            <div className="grid grid-cols-2 gap-2.5">
+              {/* Photos */}
+              <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-stone-700 flex items-center gap-1.5">
+                    <Camera className="w-3.5 h-3.5 text-stone-500" />
+                    需上传图片
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={requirePhotos}
+                    onChange={(e) => setRequirePhotos(e.target.checked)}
+                    className="w-4 h-4 text-stone-900 rounded"
+                  />
+                </div>
+                {requirePhotos && (
+                  <div className="flex items-center justify-between text-[10px] text-stone-500 pt-1 border-t border-stone-200/60">
+                    <span>最少张数:</span>
+                    <select
+                      value={minPhotos}
+                      onChange={(e) => setMinPhotos(Number(e.target.value))}
+                      className="bg-white border border-stone-200 rounded px-1.5 py-0.5 text-stone-800"
+                    >
+                      <option value={1}>1 张</option>
+                      <option value={2}>2 张</option>
+                      <option value={3}>3 张</option>
+                      <option value={4}>4 张</option>
+                    </select>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-2">
+
+              {/* Text */}
+              <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 flex items-center justify-between">
+                <span className="text-xs font-medium text-stone-700 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-stone-500" />
+                  需填写心得文字
+                </span>
                 <input
-                  id="checkbox-reminder-toggle"
                   type="checkbox"
-                  checked={reminderEnabled}
-                  onChange={(e) => setReminderEnabled(e.target.checked)}
-                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-stone-300"
+                  checked={requireText}
+                  onChange={(e) => setRequireText(e.target.checked)}
+                  className="w-4 h-4 text-stone-900 rounded"
                 />
-                <label
-                  htmlFor="checkbox-reminder-toggle"
-                  className="text-xs text-stone-700 font-semibold cursor-pointer"
-                >
-                  开启每日催促
-                </label>
               </div>
+
+              {/* Video */}
+              <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 flex items-center justify-between">
+                <span className="text-xs font-medium text-stone-700 flex items-center gap-1.5">
+                  <Video className="w-3.5 h-3.5 text-stone-500" />
+                  需上传视频
+                </span>
+                <input
+                  type="checkbox"
+                  checked={requireVideo}
+                  onChange={(e) => setRequireVideo(e.target.checked)}
+                  className="w-4 h-4 text-stone-900 rounded"
+                />
+              </div>
+
+              {/* Audio */}
+              <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 flex items-center justify-between">
+                <span className="text-xs font-medium text-stone-700 flex items-center gap-1.5">
+                  <Mic className="w-3.5 h-3.5 text-stone-500" />
+                  需录制语音
+                </span>
+                <input
+                  type="checkbox"
+                  checked={requireAudio}
+                  onChange={(e) => setRequireAudio(e.target.checked)}
+                  className="w-4 h-4 text-stone-900 rounded"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Daily Reminder & ServerChan */}
+          <div className="p-4 bg-amber-50/60 rounded-2xl border border-amber-200/80 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Bell className="w-4 h-4 text-amber-600" />
+                <span className="text-xs font-bold text-amber-900">
+                  每日打卡提醒 (ServerChan 微信推送)
+                </span>
+              </div>
+              <input
+                type="checkbox"
+                checked={reminderEnabled}
+                onChange={(e) => setReminderEnabled(e.target.checked)}
+                className="w-4 h-4 text-amber-600 rounded focus:ring-amber-500"
+              />
             </div>
 
             {reminderEnabled && (
-              <div className="p-3.5 bg-emerald-50/50 border border-emerald-200/80 rounded-2xl space-y-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-stone-700 mb-1">
-                    每日提醒推送时间
-                  </label>
-                  <input
-                    type="time"
-                    value={reminderTime}
-                    onChange={(e) => setReminderTime(e.target.value)}
-                    className="px-3 py-1.5 bg-white border border-stone-200 rounded-xl text-xs text-stone-900 font-mono font-medium focus:outline-none focus:ring-2 focus:ring-emerald-600"
-                  />
-                  <span className="text-[10px] text-stone-500 ml-2">
-                    若成员到此时仍未达标，将通过微信通道提醒
-                  </span>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-stone-700 mb-1">
-                    自定义催促文案
-                  </label>
-                  <textarea
-                    rows={2}
-                    value={reminderMessage}
-                    onChange={(e) => setReminderMessage(e.target.value)}
-                    placeholder="【{nickname}】，您参与的项目【{projectTitle}】今天还没有打卡哦，快去完成吧！"
-                    className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-stone-900 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600 resize-none"
-                  />
-                  <p className="text-[10px] text-stone-500 mt-0.5">
-                    支持变量：<code className="text-emerald-700">{"{nickname}"}</code>（成员昵称）、<code className="text-emerald-700">{"{projectTitle}"}</code>（打卡项目名称）
-                  </p>
-                </div>
+              <div className="flex items-center justify-between pt-2 border-t border-amber-200/50">
+                <span className="text-xs text-amber-800 flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5" />
+                  每日提醒时间:
+                </span>
+                <input
+                  type="time"
+                  value={reminderTime}
+                  onChange={(e) => setReminderTime(e.target.value)}
+                  className="bg-white border border-amber-200 text-stone-900 rounded-lg px-2.5 py-1 text-xs focus:ring-1 focus:ring-amber-500"
+                />
               </div>
             )}
-          </div>
-
-          <div className="pt-2">
-            <button
-              id="btn-submit-create-project"
-              type="submit"
-              disabled={submitting}
-              className="w-full py-3 bg-stone-900 hover:bg-stone-800 active:scale-[0.99] text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-            >
-              {submitting ? '创建中...' : '确认创建'}
-            </button>
+            <p className="text-[10px] text-amber-700/80 leading-relaxed">
+              开启后，若当日在此时间前未达标，系统将自动向绑定 SendKey 的成员发送微信打卡提醒。
+            </p>
           </div>
         </form>
+
+        {/* Footer Actions */}
+        <div className="px-6 py-4 border-t border-stone-100 bg-stone-50 flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2.5 text-xs font-semibold text-stone-600 hover:text-stone-900 hover:bg-stone-100 rounded-xl transition-colors"
+          >
+            取消
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            className="px-6 py-2.5 bg-stone-900 hover:bg-stone-800 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all shadow-sm active:scale-95 flex items-center gap-2"
+          >
+            {loading ? '正在创建...' : '立即创建项目'}
+          </button>
+        </div>
       </div>
     </div>
   );
