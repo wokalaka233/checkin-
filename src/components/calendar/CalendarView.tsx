@@ -7,10 +7,9 @@ import { CheckInDrawer } from './CheckInDrawer';
 import { ProjectModal } from './ProjectModal';
 import { ProjectSettingsModal } from './ProjectSettingsModal';
 import { useAuth } from '../../context/AuthContext';
-import { LogOut } from 'lucide-react';
 
 export const CalendarView: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [projects, setProjects] = useState<HabitProject[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [loadingProjects, setLoadingProjects] = useState(true);
@@ -25,21 +24,25 @@ export const CalendarView: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [selectedDateForDrawer, setSelectedDateForDrawer] = useState<string | null>(null);
 
-  // Fetch projects
+  // Fetch projects (同步化决策更新，合并渲染，彻底解决“空白占位闪烁”问题)
   const fetchProjects = useCallback(async (selectId?: string) => {
     try {
       setLoadingProjects(true);
       const list = await api.getProjects();
-      setProjects(list);
+      
+      let nextActiveId: string | null = null;
       if (list.length > 0) {
         if (selectId && list.some((p) => p.id === selectId)) {
-          setActiveProjectId(selectId);
-        } else if (!activeProjectId || !list.some((p) => p.id === activeProjectId)) {
-          setActiveProjectId(list[0].id);
+          nextActiveId = selectId;
+        } else if (activeProjectId && list.some((p) => p.id === activeProjectId)) {
+          nextActiveId = activeProjectId;
+        } else {
+          nextActiveId = list[0].id;
         }
-      } else {
-        setActiveProjectId(null);
       }
+
+      setProjects(list);
+      setActiveProjectId(nextActiveId);
     } catch (e) {
       console.error('Failed to load projects:', e);
     } finally {
@@ -51,31 +54,41 @@ export const CalendarView: React.FC = () => {
     fetchProjects();
   }, []);
 
-  // Fetch calendar records for active project & month
-  const fetchCalendarData = useCallback(async () => {
-    if (!activeProjectId) {
-      setDaysData({});
-      return;
-    }
-
-    const year = currentMonthDate.getFullYear();
-    const month = currentMonthDate.getMonth() + 1;
-    const monthStr = `${year}-${month < 10 ? `0${month}` : month}`;
-
-    try {
-      setLoadingCalendar(true);
-      const res = await api.getCalendarData(activeProjectId, monthStr);
-      setDaysData(res.days);
-    } catch (e) {
-      console.error('Failed to fetch calendar:', e);
-    } finally {
-      setLoadingCalendar(false);
-    }
-  }, [activeProjectId, currentMonthDate]);
-
+  // Fetch calendar records for active project & month (引入 Effect Cleanup 异步竞态锁定锁，彻底解决“日历覆盖消失”Bug)
   useEffect(() => {
-    fetchCalendarData();
-  }, [fetchCalendarData]);
+    let isCurrent = true;
+
+    const loadCalendarData = async () => {
+      if (!activeProjectId) {
+        setDaysData({});
+        return;
+      }
+
+      const year = currentMonthDate.getFullYear();
+      const month = currentMonthDate.getMonth() + 1;
+      const monthStr = `${year}-${month < 10 ? `0${month}` : month}`;
+
+      try {
+        setLoadingCalendar(true);
+        const res = await api.getCalendarData(activeProjectId, monthStr);
+        if (isCurrent) {
+          setDaysData(res.days || {});
+        }
+      } catch (e) {
+        console.error('Failed to fetch calendar:', e);
+      } finally {
+        if (isCurrent) {
+          setLoadingCalendar(false);
+        }
+      }
+    };
+
+    loadCalendarData();
+
+    return () => {
+      isCurrent = false; // 组件卸载、项目切换或月份切换时，抛弃前一个正在处理的慢速异步网络请求，严防数据覆盖
+    };
+  }, [activeProjectId, currentMonthDate]);
 
   // Month navigation handlers
   const handlePrevMonth = () => {
@@ -134,7 +147,7 @@ export const CalendarView: React.FC = () => {
                   </span>
                 ) : (
                   <span className="px-2 py-0.5 bg-orange-100 text-orange-800 text-[11px] font-bold rounded-md">
-                    🔥 个人火花: {activeProject.currentUserSpark || 0} 天
+                    🔥 个人火花: {activeProject.currentUserSpark || activeProject.sparks?.[user?.id || ''] || 0} 天
                   </span>
                 )}
                 {(activeProject.reminderEnabled ?? activeProject.rules?.reminderEnabled) && (
@@ -169,6 +182,10 @@ export const CalendarView: React.FC = () => {
             daysData={daysData}
             onSelectDate={(dateStr) => setSelectedDateForDrawer(dateStr)}
           />
+        ) : loadingProjects ? (
+          <div className="bg-white rounded-2xl border border-stone-200 p-12 text-center shadow-xs">
+            <p className="text-sm text-stone-400">正在云端同步项目...</p>
+          </div>
         ) : (
           <div className="bg-white rounded-2xl border border-stone-200 p-12 text-center shadow-xs space-y-3">
             <p className="text-sm text-stone-600">您当前还没有任何打卡项目</p>
@@ -187,8 +204,8 @@ export const CalendarView: React.FC = () => {
       <ProjectModal
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
-        onSuccess={(newId) => {
-          fetchProjects(newId);
+        onSuccess={(proj) => {
+          fetchProjects(proj.id);
         }}
       />
 
@@ -200,7 +217,6 @@ export const CalendarView: React.FC = () => {
           onClose={() => setIsSettingsModalOpen(false)}
           onUpdated={() => {
             fetchProjects(activeProject.id);
-            fetchCalendarData();
           }}
         />
       )}
@@ -213,7 +229,6 @@ export const CalendarView: React.FC = () => {
           project={activeProject}
           onClose={() => setSelectedDateForDrawer(null)}
           onCheckInSuccess={() => {
-            fetchCalendarData();
             fetchProjects(activeProject.id);
           }}
         />
