@@ -25,7 +25,7 @@ export const setAuthToken = (token: string | null) => {
 
 export const getAuthToken = () => authToken;
 
-// Local storage keys
+// Local storage keys (保留用于基础断网兜底，但核心写入一律优先通过 api 发送到 D1 数据库)
 const LS_FRIENDS_KEY = 'daka_local_friends';
 const LS_REQUESTS_KEY = 'daka_local_friend_requests';
 const LS_REGISTERED_USERS_KEY = 'daka_local_registered_users';
@@ -33,7 +33,7 @@ const LS_CHECKINS_KEY = 'daka_local_checkins';
 const LS_PROJECTS_KEY = 'daka_local_projects';
 const LS_MESSAGES_KEY = 'daka_local_messages';
 
-// 获取所有真实存在的用户库（含系统内置与新注册的用户）
+// 获取所有已知注册过的用户库 (用于在 D1 离线或弱网降级时，动态解析用户昵称，杜绝匿名脏数据覆盖)
 const getKnownUsers = (): User[] => {
   try {
     const raw = localStorage.getItem(LS_REGISTERED_USERS_KEY);
@@ -86,7 +86,7 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 3500);
+  const timeoutId = setTimeout(() => controller.abort(), 6000); // 适度放宽超时至6秒，避免 Cloudflare 冷启动被误杀中断
 
   try {
     const res = await fetch(url, {
@@ -97,7 +97,7 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
     clearTimeout(timeoutId);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(data.error || '请求失败');
+      throw new Error(data.error || '云端请求失败');
     }
     return data;
   } catch (err: any) {
@@ -110,111 +110,68 @@ export const api = {
   // Auth
   register: async (data: { username: string; password: string; nickname: string }) => {
     try {
-      return await request<{ user: User; token: string }>('/api/auth/register', {
+      const res = await request<{ user: User; token: string }>('/api/auth/register', {
         method: 'POST',
         body: JSON.stringify(data),
       });
-    } catch {
-      const user: User = {
-        id: 'u_' + data.username,
-        username: data.username,
-        nickname: data.nickname || data.username,
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.username}`,
-        createdAt: new Date().toISOString(),
-        role: 'user',
-        isAdmin: false,
-      };
-      const token = 'token_' + data.username;
-      saveUserToKnown(user);
-      setAuthToken(token);
-      return { user, token };
+      saveUserToKnown(res.user);
+      setAuthToken(res.token);
+      return res;
+    } catch (err) {
+      // 真实上线标准：抛出错误让前端能看见真实的注册失败原因（如重复用户名），不实施暗中本地假注册降级
+      throw err;
     }
   },
 
   login: async (data: { username: string; password: string }) => {
     try {
-      return await request<{ user: User; token: string }>('/api/auth/login', {
+      const res = await request<{ user: User; token: string }>('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify(data),
       });
-    } catch {
-      const isSpecialAdmin = data.username === 'admin';
-      const user: User = {
-        id: 'u_' + data.username,
-        username: data.username,
-        nickname:
-          data.username === 'user1'
-            ? '打卡先锋'
-            : data.username === 'user2'
-            ? '晨跑小鹿'
-            : data.username === 'user3'
-            ? '读书伴侣'
-            : isSpecialAdmin
-            ? '系统管理员'
-            : data.username,
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.username}`,
-        createdAt: new Date().toISOString(),
-        role: isSpecialAdmin ? 'admin' : 'user',
-        isAdmin: isSpecialAdmin,
-      };
-      const token = 'token_' + data.username;
-      saveUserToKnown(user);
-      setAuthToken(token);
-      return { user, token };
+      saveUserToKnown(res.user);
+      setAuthToken(res.token);
+      return res;
+    } catch (err) {
+      // 真实上线标准：直接向上抛出密码错误或账号不存在报错，杜绝无密码直接登录的假数据模式
+      throw err;
     }
   },
 
   getMe: async (): Promise<User> => {
     try {
-      return await request<User>('/api/auth/me');
-    } catch {
+      const u = await request<User>('/api/auth/me');
+      saveUserToKnown(u);
+      return u;
+    } catch (err) {
+      // 本地只进行令牌存在性基础还原，并引导至真实的登录页面
       const token = getAuthToken();
-      const username = token?.replace('token_', '') || 'user1';
-      const isSpecialAdmin = username === 'admin';
-      return {
-        id: 'u_' + username,
-        username,
-        nickname:
-          username === 'user1'
-            ? '打卡先锋'
-            : username === 'user2'
-            ? '晨跑小鹿'
-            : username === 'user3'
-            ? '读书伴侣'
-            : isSpecialAdmin
-            ? '系统管理员'
-            : username,
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username}`,
-        createdAt: new Date().toISOString(),
-        role: isSpecialAdmin ? 'admin' : 'user',
-        isAdmin: isSpecialAdmin,
-      };
+      if (!token) throw new Error('未登录');
+      const username = token.replace('token_', '');
+      const knownUsers = getKnownUsers();
+      const matched = knownUsers.find(x => x.username.toLowerCase() === username.toLowerCase());
+      if (matched) return matched;
+      throw err;
     }
   },
 
+  // 保存 ServerChan 推送密钥到云端 D1 (真实上线)
   updateSendKey: async (sendKey: string) => {
-    try {
-      return await request<{ success: boolean; serverchanSendKey: string }>('/api/user/sendkey', {
-        method: 'POST',
-        body: JSON.stringify({ sendKey }),
-      });
-    } catch {
-      return { success: true, serverchanSendKey: sendKey };
-    }
+    return await request<{ success: boolean; serverchanSendKey: string }>('/api/user/sendkey', {
+      method: 'POST',
+      body: JSON.stringify({ sendKey }),
+    });
   },
 
+  // 触发实机微信推送测试 (真实上线)
   testPush: async (sendKey?: string) => {
-    try {
-      return await request<{ success: boolean; message: string }>('/api/push/test', {
-        method: 'POST',
-        body: JSON.stringify({ sendKey }),
-      });
-    } catch {
-      return { success: true, message: '测试推送已模拟触发成功！' };
-    }
+    return await request<{ success: boolean; message: string }>('/api/push/test', {
+      method: 'POST',
+      body: JSON.stringify({ sendKey }),
+    });
   },
 
-  // Friends - 真实好友列表
+  // Friends - 真实好友列表 (真实上线，直连 D1 双向好友)
   getFriends: async (): Promise<FriendUser[]> => {
     try {
       const res = await request<FriendUser[]>('/api/friends/list');
@@ -227,6 +184,7 @@ export const api = {
     }
   },
 
+  // 好友申请：获取发给我的待处理申请
   getFriendRequests: async (): Promise<(FriendRequest & { fromUser: User })[]> => {
     try {
       const res = await request<(FriendRequest & { fromUser: User })[]>('/api/friends/requests');
@@ -240,143 +198,28 @@ export const api = {
     }
   },
 
+  // 发送好友申请 (真实上线，未注册用户严格返回 404 无法发送)
   sendFriendRequest: async (toUsername: string): Promise<FriendRequest> => {
-    try {
-      return await request<FriendRequest>('/api/friends/request', {
-        method: 'POST',
-        body: JSON.stringify({ toUsername }),
-      });
-    } catch {
-      const token = getAuthToken() || 'token_user1';
-      const myUsername = token.replace('token_', '');
-      
-      if (toUsername.toLowerCase() === myUsername.toLowerCase()) {
-        throw new Error('不能向自己发送好友申请');
-      }
-
-      // 严格检查目标用户是否存在
-      const knownUsers = getKnownUsers();
-      const target = knownUsers.find((u) => u.username.toLowerCase() === toUsername.trim().toLowerCase());
-      if (!target) {
-        throw new Error(`用户 @${toUsername} 不存在，请核对账号`);
-      }
-
-      // 检查是否已经是好友
-      const myFriendsRaw = localStorage.getItem(`${LS_FRIENDS_KEY}_${myUsername}`);
-      const myFriends: FriendUser[] = myFriendsRaw ? JSON.parse(myFriendsRaw) : [];
-      if (myFriends.some((f) => f.username.toLowerCase() === toUsername.toLowerCase())) {
-        throw new Error(`您和 @${target.nickname || target.username} 已经是好友了`);
-      }
-
-      const currentReqs = getLocalRequests();
-      const existing = currentReqs.find(
-        (r) =>
-          r.fromUserId === 'u_' + myUsername &&
-          r.toUserId === target.id &&
-          r.status === 'pending'
-      );
-      if (existing) {
-        throw new Error('已发送过好友申请，请等待对方同意');
-      }
-
-      const me = knownUsers.find((u) => u.username.toLowerCase() === myUsername.toLowerCase()) || {
-        id: 'u_' + myUsername,
-        username: myUsername,
-        nickname: myUsername,
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${myUsername}`,
-        createdAt: new Date().toISOString(),
-        role: 'user',
-        isAdmin: false,
-      };
-
-      const req: FriendRequest & { fromUser: User } = {
-        id: 'req_' + Date.now(),
-        fromUserId: 'u_' + myUsername,
-        toUserId: target.id,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-        fromUser: me,
-      };
-
-      setAllRequests([...currentReqs, req]);
-      return req;
-    }
+    return await request<FriendRequest>('/api/friends/request', {
+      method: 'POST',
+      body: JSON.stringify({ toUsername }),
+    });
   },
 
+  // 同意/拒绝好友申请 (双向建交写入 D1)
   respondFriendRequest: async (requestId: string, action: 'accept' | 'reject') => {
-    try {
-      return await request<{ success: boolean }>('/api/friends/respond', {
-        method: 'POST',
-        body: JSON.stringify({ requestId, action }),
-      });
-    } catch {
-      const token = getAuthToken() || 'token_user1';
-      const myUsername = token.replace('token_', '');
-      const currentReqs = getLocalRequests();
-      const targetReq = currentReqs.find((r) => r.id === requestId);
-      
-      setAllRequests(currentReqs.filter((r) => r.id !== requestId));
-
-      if (action === 'accept' && targetReq) {
-        const fromUser = targetReq.fromUser;
-        const fromUsername = fromUser.username;
-        
-        // 1. 给接收方添加好友
-        const myFriendsRaw = localStorage.getItem(`${LS_FRIENDS_KEY}_${myUsername}`);
-        const myFriends: FriendUser[] = myFriendsRaw ? JSON.parse(myFriendsRaw) : [];
-        const newFriendForMe: FriendUser = {
-          ...targetReq.fromUser,
-          unreadCount: 0,
-        };
-        if (!myFriends.some((f) => f.id === newFriendForMe.id)) {
-          localStorage.setItem(`${LS_FRIENDS_KEY}_${myUsername}`, JSON.stringify([...myFriends, newFriendForMe]));
-        }
-
-        // 2. 给发起方添加好友（形成双向好友）
-        const knownUsers = getKnownUsers();
-        const me = knownUsers.find((u) => u.username.toLowerCase() === myUsername.toLowerCase()) || {
-          id: 'u_' + myUsername,
-          username: myUsername,
-          nickname: myUsername,
-          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${myUsername}`,
-          createdAt: new Date().toISOString(),
-          role: 'user',
-          isAdmin: false,
-        };
-        const senderFriendsRaw = localStorage.getItem(`${LS_FRIENDS_KEY}_${fromUsername}`);
-        const senderFriends: FriendUser[] = senderFriendsRaw ? JSON.parse(senderFriendsRaw) : [];
-        const newFriendForSender: FriendUser = {
-          ...me,
-          unreadCount: 0,
-        };
-        if (!senderFriends.some((f) => f.id === newFriendForSender.id)) {
-          localStorage.setItem(`${LS_FRIENDS_KEY}_${fromUsername}`, JSON.stringify([...senderFriends, newFriendForSender]));
-        }
-      }
-      return { success: true };
-    }
+    return await request<{ success: boolean }>('/api/friends/respond', {
+      method: 'POST',
+      body: JSON.stringify({ requestId, action }),
+    });
   },
 
+  // 搜索真实注册用户 (绝对不展示虚拟或未注册的假账号)
   searchUsers: async (q: string): Promise<User[]> => {
-    try {
-      return await request<User[]>(`/api/friends/search?q=${encodeURIComponent(q)}`);
-    } catch {
-      const token = getAuthToken() || 'token_user1';
-      const myUsername = token.replace('token_', '');
-      const cleanQ = q.trim().toLowerCase();
-      if (!cleanQ) return [];
-
-      const knownUsers = getKnownUsers();
-      const matched = knownUsers.filter(
-        (u) =>
-          u.username.toLowerCase().includes(cleanQ) ||
-          (u.nickname && u.nickname.toLowerCase().includes(cleanQ))
-      );
-      return matched.filter((u) => u.username.toLowerCase() !== myUsername.toLowerCase());
-    }
+    return await request<User[]>(`/api/friends/search?q=${encodeURIComponent(q)}`);
   },
 
-  // Projects
+  // Projects - 获取我加入或代创建的所有项目 (D1 数据库)
   getProjects: async (): Promise<HabitProject[]> => {
     try {
       const res = await request<HabitProject[]>('/api/projects/list');
@@ -386,28 +229,11 @@ export const api = {
         const raw = localStorage.getItem(LS_PROJECTS_KEY);
         if (raw) return JSON.parse(raw);
       } catch {}
-      const defaultProj: HabitProject = {
-        id: 'p_default_1',
-        title: '每日自律打卡',
-        creatorId: 'u_user1',
-        creatorNickname: '打卡先锋',
-        members: ['u_user1'],
-        sparks: { u_user1: 1 },
-        rules: {
-          requirePhotos: true,
-          minPhotos: 1,
-          requireVideo: false,
-          requireAudio: false,
-          requireText: true,
-          reminderEnabled: true,
-          reminderTime: '21:00',
-        },
-        createdAt: new Date().toISOString(),
-      };
-      return [defaultProj];
+      return [];
     }
   },
 
+  // 创建打卡项目 (支持代创建模式与多端设备同步)
   createProject: async (data: {
     title: string;
     isProxy: boolean;
@@ -415,128 +241,39 @@ export const api = {
     creatorParticipates?: boolean;
     rules: CheckInRule;
   }): Promise<HabitProject> => {
-    try {
-      return await request<HabitProject>('/api/projects/create', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    } catch {
-      const token = getAuthToken() || 'token_user1';
-      const myUsername = token.replace('token_', '');
-      const myId = 'u_' + myUsername;
-      const memberIds = [...(data.selectedFriendIds || [])];
-      if (data.creatorParticipates !== false && !memberIds.includes(myId)) {
-        memberIds.push(myId);
-      }
-
-      const sparks: Record<string, number> = {};
-      memberIds.forEach((id) => (sparks[id] = 1));
-
-      const newProj: HabitProject = {
-        id: 'p_' + Date.now(),
-        title: data.title,
-        creatorId: myId,
-        creatorNickname: myUsername,
-        members: memberIds,
-        sparks,
-        rules: data.rules,
-        createdAt: new Date().toISOString(),
-      };
-
-      try {
-        const current = await api.getProjects();
-        localStorage.setItem(LS_PROJECTS_KEY, JSON.stringify([...current, newProj]));
-      } catch {}
-      return newProj;
-    }
+    return await request<HabitProject>('/api/projects/create', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 
   updateProjectRules: async (projectId: string, rules: CheckInRule) => {
-    try {
-      return await request<HabitProject>(`/api/projects/${projectId}/rule`, {
-        method: 'PUT',
-        body: JSON.stringify({ rules }),
-      });
-    } catch {
-      return { id: projectId, rules } as any;
-    }
+    return await request<HabitProject>(`/api/projects/${projectId}/rule`, {
+      method: 'PUT',
+      body: JSON.stringify({ rules }),
+    });
   },
 
   removeMember: async (projectId: string, memberId: string) => {
-    try {
-      return await request<HabitProject>(`/api/projects/${projectId}/remove-member`, {
-        method: 'POST',
-        body: JSON.stringify({ memberId }),
-      });
-    } catch {
-      return { id: projectId } as any;
-    }
+    return await request<HabitProject>(`/api/projects/${projectId}/remove-member`, {
+      method: 'POST',
+      body: JSON.stringify({ memberId }),
+    });
   },
 
   addMember: async (projectId: string, memberId: string) => {
-    try {
-      return await request<HabitProject>(`/api/projects/${projectId}/add-member`, {
-        method: 'POST',
-        body: JSON.stringify({ memberId }),
-      });
-    } catch {
-      return { id: projectId } as any;
-    }
-  },
-
-  // Calendar & Checkins
-  getCalendarData: async (projectId: string, month: string) => {
-    try {
-      return await request<any>(`/api/checkins/calendar?projectId=${encodeURIComponent(projectId)}&month=${encodeURIComponent(month)}`);
-    } catch (e) {
-      console.warn('Calendar API fallback to local data', e);
-    }
-
-    const token = getAuthToken() || 'token_user1';
-    const myUsername = token.replace('token_', '');
-    const myId = 'u_' + myUsername;
-
-    const projects = await api.getProjects();
-    const proj = projects.find((p) => p.id === projectId) || projects[0] || {
-      id: projectId,
-      title: '每日自律打卡',
-      creatorId: myId,
-      creatorNickname: myUsername,
-      members: [myId],
-      sparks: { [myId]: 1 },
-      rules: { requirePhotos: false, minPhotos: 0, requireVideo: false, requireAudio: false, requireText: false },
-      createdAt: new Date().toISOString(),
-    };
-
-    let allCheckIns: CheckInRecord[] = [];
-    try {
-      allCheckIns = JSON.parse(localStorage.getItem(LS_CHECKINS_KEY) || '[]');
-    } catch {}
-
-    const days: Record<string, any> = {};
-    const projRecords = allCheckIns.filter((r) => r.projectId === projectId && r.date.startsWith(month));
-
-    projRecords.forEach((rec) => {
-      if (!days[rec.date]) {
-        days[rec.date] = {
-          date: rec.date,
-          status: rec.isQualified ? 'red' : 'yellow',
-          records: [rec],
-          allQualified: rec.isQualified,
-          hasAnySubmission: true,
-          hasMySubmission: rec.userId === myId,
-          isMyQualified: rec.userId === myId && rec.isQualified,
-        };
-      }
+    return await request<HabitProject>(`/api/projects/${projectId}/add-member`, {
+      method: 'POST',
+      body: JSON.stringify({ memberId }),
     });
-
-    return {
-      month,
-      project: proj,
-      days,
-    };
   },
 
+  // Calendar & Checkins (拉取当月 D1 打卡记录)
+  getCalendarData: async (projectId: string, month: string) => {
+    return await request<any>(`/api/checkins/calendar?projectId=${encodeURIComponent(projectId)}&month=${encodeURIComponent(month)}`);
+  },
+
+  // 提交打卡 (真实写入 D1)
   submitCheckIn: async (data: {
     projectId: string;
     date: string;
@@ -545,58 +282,18 @@ export const api = {
     audios: { url: string; duration: number }[];
     text: string;
   }) => {
-    try {
-      return await request<any>('/api/checkins/submit', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    } catch {
-      const token = getAuthToken() || 'token_user1';
-      const myUsername = token.replace('token_', '');
-      const myId = 'u_' + myUsername;
-      const record: CheckInRecord = {
-        id: 'rec_' + Date.now(),
-        projectId: data.projectId,
-        userId: myId,
-        userNickname: myUsername,
-        date: data.date,
-        photos: data.photos,
-        videos: data.videos,
-        audios: data.audios,
-        text: data.text,
-        isQualified: (data.photos?.length || 0) >= 1 || !!data.text,
-        createdAt: new Date().toISOString(),
-      };
-
-      try {
-        const existing = JSON.parse(localStorage.getItem(LS_CHECKINS_KEY) || '[]');
-        const filtered = existing.filter(
-          (r: CheckInRecord) => !(r.projectId === data.projectId && r.userId === myId && r.date === data.date)
-        );
-        localStorage.setItem(LS_CHECKINS_KEY, JSON.stringify([...filtered, record]));
-      } catch {}
-
-      return {
-        record,
-        sparkUpdate: { newSpark: 2, isRekindling: false, rekindleProgress: 0 },
-      };
-    }
+    return await request<any>('/api/checkins/submit', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 
   getDayDetail: async (projectId: string, date: string) => {
-    try {
-      return await request<{
-        date: string;
-        records: CheckInRecord[];
-        comments: DailyComment[];
-      }>(`/api/checkins/day-detail?projectId=${encodeURIComponent(projectId)}&date=${encodeURIComponent(date)}`);
-    } catch {
-      return {
-        date,
-        records: [],
-        comments: [],
-      };
-    }
+    return await request<{
+      date: string;
+      records: CheckInRecord[];
+      comments: DailyComment[];
+    }>(`/api/checkins/day-detail?projectId=${encodeURIComponent(projectId)}&date=${encodeURIComponent(date)}`);
   },
 
   // Comments
@@ -616,26 +313,10 @@ export const api = {
     replyToCommentId?: string;
     replyToNickname?: string;
   }): Promise<DailyComment> => {
-    try {
-      return await request<DailyComment>('/api/comments/create', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    } catch {
-      const token = getAuthToken() || 'token_user1';
-      const myUsername = token.replace('token_', '');
-      return {
-        id: 'cm_' + Date.now(),
-        projectId: data.projectId,
-        date: data.date,
-        userId: 'u_' + myUsername,
-        userNickname: myUsername,
-        content: data.content,
-        replyToCommentId: data.replyToCommentId,
-        replyToNickname: data.replyToNickname,
-        createdAt: new Date().toISOString(),
-      };
-    }
+    return await request<DailyComment>('/api/comments/create', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 
   // Messages
@@ -659,42 +340,17 @@ export const api = {
     content: string;
     audioDuration?: number;
   }): Promise<ChatMessage> => {
-    try {
-      return await request<ChatMessage>('/api/messages/send', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    } catch {
-      const token = getAuthToken() || 'token_user1';
-      const myUsername = token.replace('token_', '');
-      const msg: ChatMessage = {
-        id: 'msg_' + Date.now(),
-        senderId: 'u_' + myUsername,
-        receiverId: data.receiverId,
-        type: data.type,
-        content: data.content,
-        audioDuration: data.audioDuration,
-        isRead: false,
-        createdAt: new Date().toISOString(),
-      };
-      try {
-        const key = `${LS_MESSAGES_KEY}_${data.receiverId}`;
-        const prev = JSON.parse(localStorage.getItem(key) || '[]');
-        localStorage.setItem(key, JSON.stringify([...prev, msg]));
-      } catch {}
-      return msg;
-    }
+    return await request<ChatMessage>('/api/messages/send', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 
   markMessagesRead: async (friendId: string) => {
-    try {
-      return await request<{ success: boolean }>('/api/messages/read', {
-        method: 'POST',
-        body: JSON.stringify({ friendId }),
-      });
-    } catch {
-      return { success: true };
-    }
+    return await request<{ success: boolean }>('/api/messages/read', {
+      method: 'POST',
+      body: JSON.stringify({ friendId }),
+    });
   },
 
   getBadgeCount: async (): Promise<{ unreadCount: number }> => {
@@ -705,48 +361,35 @@ export const api = {
     }
   },
 
-  // Admin Master API (Highest Authority)
+  // Admin Master API (全功能 D1 直通，绝无演示成分)
   getAdminUsers: async (): Promise<AdminUserSummary[]> => {
-    try {
-      return await request<AdminUserSummary[]>('/api/admin/users');
-    } catch {
-      return [
-        {
-          id: 'u_user1',
-          username: 'user1',
-          nickname: '打卡先锋',
-          avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=user1',
-          createdAt: new Date().toISOString(),
-          projectCount: 1,
-          checkInCount: 12,
-        },
-      ];
-    }
+    return await request<AdminUserSummary[]>('/api/admin/users');
   },
 
   updateUserPassword: async (userId: string, password: string) => {
-    try {
-      return await request<{ success: boolean; user: any }>(`/api/admin/users/${userId}/password`, {
-        method: 'POST',
-        body: JSON.stringify({ password }),
-      });
-    } catch {
-      return { success: true, user: { id: userId } };
-    }
+    return await request<{ success: boolean; user: any }>(`/api/admin/users/${userId}/password`, {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    });
   },
 
   getAdminUserDetail: async (userId: string): Promise<AdminUserDetail> => {
     try {
       return await request<AdminUserDetail>(`/api/admin/users/${userId}/detail`);
-    } catch {
+    } catch (err) {
+      // 核心排错与降级防护：如遇弱网或未连接 D1，不使用写死的用户和硬编码 user 覆盖，而是查找已知注册的用户详情，避免详情页面匿名闪退
+      const knownUsers = getKnownUsers();
+      const matchedUser = knownUsers.find((u) => u.id === userId) || {
+        id: userId,
+        username: 'user',
+        nickname: '本地离线用户',
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`,
+        createdAt: new Date().toISOString(),
+        role: 'user',
+        isAdmin: false,
+      };
       return {
-        user: {
-          id: userId,
-          username: 'user',
-          nickname: '用户',
-          avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + userId,
-          createdAt: new Date().toISOString(),
-        },
+        user: matchedUser,
         projects: [],
         allProjects: [],
         checkIns: [],
@@ -764,26 +407,10 @@ export const api = {
     text?: string;
     isQualified?: boolean;
   }) => {
-    try {
-      return await request<{ success: boolean; record: CheckInRecord }>('/api/admin/checkins', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    } catch {
-      const record: CheckInRecord = {
-        id: 'rec_admin_' + Date.now(),
-        projectId: data.projectId,
-        userId: data.userId,
-        date: data.date,
-        photos: data.photos || [],
-        videos: data.videos || [],
-        audios: (data.audios as any) || [],
-        text: data.text || '',
-        isQualified: data.isQualified !== false,
-        createdAt: new Date().toISOString(),
-      };
-      return { success: true, record };
-    }
+    return await request<{ success: boolean; record: CheckInRecord }>('/api/admin/checkins', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 
   adminUpdateCheckIn: async (
@@ -797,110 +424,65 @@ export const api = {
       date?: string;
     }
   ) => {
-    try {
-      return await request<{ success: boolean; record: CheckInRecord }>(`/api/admin/checkins/${checkInId}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      });
-    } catch {
-      return { success: true, record: { id: checkInId, ...data } as any };
-    }
+    return await request<{ success: boolean; record: CheckInRecord }>(`/api/admin/checkins/${checkInId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
   },
 
   adminDeleteCheckIn: async (checkInId: string) => {
-    try {
-      return await request<{ success: boolean }>(`/api/admin/checkins/${checkInId}`, {
-        method: 'DELETE',
-      });
-    } catch {
-      return { success: true };
-    }
+    return await request<{ success: boolean }>(`/api/admin/checkins/${checkInId}`, {
+      method: 'DELETE',
+    });
   },
 
   adminDeleteProject: async (projectId: string) => {
-    try {
-      return await request<{ success: boolean }>(`/api/admin/projects/${projectId}`, {
-        method: 'DELETE',
-      });
-    } catch {
-      return { success: true };
-    }
+    return await request<{ success: boolean }>(`/api/admin/projects/${projectId}`, {
+      method: 'DELETE',
+    });
   },
 
-  // Admin Notification Configs Management
+  // Admin Notification Configs Management (微信 ServerChan 每日提醒规则)
   getNotificationConfigs: async (): Promise<NotificationConfig[]> => {
-    try {
-      return await request<NotificationConfig[]>('/api/admin/notifications/configs');
-    } catch {
-      return [];
-    }
+    return await request<NotificationConfig[]>('/api/admin/notifications/configs');
   },
 
   createNotificationConfig: async (data: Omit<NotificationConfig, 'id' | 'createdAt'>) => {
-    try {
-      return await request<{ success: boolean; config: NotificationConfig }>('/api/admin/notifications/configs', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
-    } catch {
-      const config: NotificationConfig = {
-        id: 'cfg_' + Date.now(),
-        ...data,
-        createdAt: new Date().toISOString(),
-      };
-      return { success: true, config };
-    }
+    return await request<{ success: boolean; config: NotificationConfig }>('/api/admin/notifications/configs', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 
   updateNotificationConfig: async (id: string, data: Partial<NotificationConfig>) => {
-    try {
-      return await request<{ success: boolean; config: NotificationConfig }>(`/api/admin/notifications/configs/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      });
-    } catch {
-      return { success: true, config: { id, ...data } as any };
-    }
+    return await request<{ success: boolean; config: NotificationConfig }>(`/api/admin/notifications/configs/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
   },
 
   toggleNotificationConfig: async (id: string, enabled: boolean) => {
-    try {
-      return await request<{ success: boolean; config: NotificationConfig }>(`/api/admin/notifications/configs/${id}/toggle`, {
-        method: 'PATCH',
-        body: JSON.stringify({ enabled }),
-      });
-    } catch {
-      return { success: true, config: { id, enabled } as any };
-    }
+    return await request<{ success: boolean; config: NotificationConfig }>(`/api/admin/notifications/configs/${id}/toggle`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    });
   },
 
   deleteNotificationConfig: async (id: string) => {
-    try {
-      return await request<{ success: boolean }>(`/api/admin/notifications/configs/${id}`, {
-        method: 'DELETE',
-      });
-    } catch {
-      return { success: true };
-    }
+    return await request<{ success: boolean }>(`/api/admin/notifications/configs/${id}`, {
+      method: 'DELETE',
+    });
   },
 
+  // 微信每日督促群发引擎接口：触发后后端会自动比对今日未打卡成员并定向进行微信推送 (实机上线)
   triggerDailyReminderPush: async () => {
-    try {
-      return await request<{
-        success: boolean;
-        sentCount: number;
-        skippedNoKeyCount: number;
-        details: { nickname: string; projectTitle: string; success: boolean }[];
-      }>('/api/admin/notifications/trigger-reminder', {
-        method: 'POST',
-      });
-    } catch {
-      return {
-        success: true,
-        sentCount: 0,
-        skippedNoKeyCount: 0,
-        details: [],
-      };
-    }
+    return await request<{
+      success: boolean;
+      sentCount: number;
+      skippedNoKeyCount: number;
+      details: { nickname: string; projectTitle: string; success: boolean }[];
+    }>('/api/admin/notifications/trigger-reminder', {
+      method: 'POST',
+    });
   },
 };
