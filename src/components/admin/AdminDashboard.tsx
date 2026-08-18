@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Users,
   Search,
@@ -7,8 +7,6 @@ import {
   Image as ImageIcon,
   Video,
   Mic,
-  Play,
-  Pause,
   Trash2,
   Edit,
   Plus,
@@ -19,12 +17,10 @@ import {
   RefreshCw,
   Eye,
   EyeOff,
-  Flame,
   Shield,
   Layers,
-  FileText,
 } from 'lucide-react';
-import { AdminUserSummary, AdminUserDetail, CheckInRecord, HabitProject } from '../../types';
+import { AdminUserSummary, AdminUserDetail, CheckInRecord } from '../../types';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { AdminPasswordModal } from './AdminPasswordModal';
@@ -67,8 +63,14 @@ export const AdminDashboard: React.FC = () => {
   });
 
   // Audio player & Lightbox
-  const [playingAudioUrl, setPlayingAudioUrl] = useState<string | null>(null);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+
+  // 引入 useRef 指针锁，用于动态锁定当前激活的用户，解决异步请求竞态带来的“闪退到匿名”Bug
+  const selectedUserIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedUserIdRef.current = selectedUserId;
+  }, [selectedUserId]);
 
   // Fetch all users
   const fetchUsers = useCallback(async () => {
@@ -87,16 +89,20 @@ export const AdminDashboard: React.FC = () => {
     fetchUsers();
   }, [fetchUsers]);
 
-  // Fetch selected user's details
+  // Fetch selected user's details (融入 Ref 指针校验锁，杜绝过期的慢速网络请求覆盖当前详情)
   const fetchUserDetail = useCallback(async (userId: string) => {
     try {
       setLoadingDetail(true);
       const data = await api.getAdminUserDetail(userId);
-      setUserDetail(data);
+      if (userId === selectedUserIdRef.current) {
+        setUserDetail(data);
+      }
     } catch (e) {
       console.error('Failed to load user detail:', e);
     } finally {
-      setLoadingDetail(false);
+      if (userId === selectedUserIdRef.current) {
+        setLoadingDetail(false);
+      }
     }
   }, []);
 
@@ -446,7 +452,7 @@ export const AdminDashboard: React.FC = () => {
                         账号：@{userDetail.user.username}
                       </div>
                       <div className="text-[11px] text-stone-400 mt-1">
-                        注册时间：{new Date(userDetail.user.createdAt).toLocaleString()}
+                        注册时间：{userDetail.user.createdAt ? new Date(userDetail.user.createdAt).toLocaleString() : '云端同步中'}
                       </div>
                     </div>
                   </div>
@@ -455,7 +461,7 @@ export const AdminDashboard: React.FC = () => {
                     <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs">
                       <span className="text-stone-500">当前存储密码：</span>
                       <span className="font-mono font-bold text-stone-900 ml-1">
-                        {userDetail.user.password || '123456'}
+                        {userDetail.user.password || '******'}
                       </span>
                     </div>
 
