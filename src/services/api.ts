@@ -118,7 +118,6 @@ export const api = {
       setAuthToken(res.token);
       return res;
     } catch (err) {
-      // 真实上线标准：抛出错误让前端能看见真实的注册失败原因（如重复用户名），不实施暗中本地假注册降级
       throw err;
     }
   },
@@ -133,7 +132,6 @@ export const api = {
       setAuthToken(res.token);
       return res;
     } catch (err) {
-      // 真实上线标准：直接向上抛出密码错误或账号不存在报错，杜绝无密码直接登录的假数据模式
       throw err;
     }
   },
@@ -144,7 +142,6 @@ export const api = {
       saveUserToKnown(u);
       return u;
     } catch (err) {
-      // 本地只进行令牌存在性基础还原，并引导至真实的登录页面
       const token = getAuthToken();
       if (!token) throw new Error('未登录');
       const username = token.replace('token_', '');
@@ -377,7 +374,6 @@ export const api = {
     try {
       return await request<AdminUserDetail>(`/api/admin/users/${userId}/detail`);
     } catch (err) {
-      // 核心排错与降级防护：如遇弱网或未连接 D1，不使用写死的用户和硬编码 user 覆盖，而是查找已知注册的用户详情，避免详情页面匿名闪退
       const knownUsers = getKnownUsers();
       const matchedUser = knownUsers.find((u) => u.id === userId) || {
         id: userId,
@@ -395,6 +391,11 @@ export const api = {
         checkIns: [],
       };
     }
+  },
+
+  // 新增：管理员专属私信对话流水云调用审计接口 (真实上云，拒绝任何 Local 降级)
+  getAdminUserMessages: async (userId: string): Promise<any[]> => {
+    return await request<any[]>(`/api/admin/users/${userId}/messages`);
   },
 
   adminCreateCheckIn: async (data: {
@@ -474,7 +475,7 @@ export const api = {
     });
   },
 
-  // 微信每日督促群发引擎接口：触发后后端会自动比对今日未打卡成员并定向进行微信推送 (实机上线)
+  // 微信每日督促群发引擎接口
   triggerDailyReminderPush: async () => {
     return await request<{
       success: boolean;
