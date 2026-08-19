@@ -151,7 +151,7 @@ async function ensureTables(db: any) {
       const createdAt = new Date().toISOString();
       await db.prepare(`
         INSERT INTO notification_configs (id, type, name, description, enabled, trigger_time, title_template, content_template, quota_cost_note, created_at)
-        VALUES (?, 'daily_uncheck_reminder', '每日未打卡提醒', '自动检索并推送每日打卡督促通知', 1, '21:00', '⏰ 每日打卡提醒', '您参与的项目今天还没有打卡哦，快去完成吧！', '微信实机督促通道', ?)
+        VALUES (?, 'daily_uncheck_reminder', '每日未打卡提醒', '自动检索并推送每日打卡催促通知', 1, '21:00', '⏰ 每日打卡提醒', '您参与的项目今天还没有打卡哦，快去完成吧！', '微信实机督促通道', ?)
       `).bind(cfgId, createdAt).run();
     }
 
@@ -349,14 +349,14 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       }
     }
 
-    // 6. 打卡项目列表：查询云端项目且动态注入云开关状态 (解决管理后台一关、用户端角标同步消失问题)
+    // 6. 打卡项目列表：查询云端项目且动态注入云开关状态 (只要存在任意一条启用状态即判定为全局开启，彻底实现后台开关联动)
     if (path === '/projects/list' && method === 'GET') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse([]);
 
-      // 实时获取 D1 云端关于每日督促的全局配置开启状态
-      const globalConfig = await db.prepare('SELECT enabled FROM notification_configs WHERE type = ?').bind('daily_uncheck_reminder').first();
-      const isGlobalEnabled = globalConfig ? globalConfig.enabled === 1 : true;
+      // 核心重构：实时获取云端 D1 数据库中是否存在任何一条处于开启状态（enabled = 1）的推送规则，有则认定为全局开启
+      const globalConfig = await db.prepare('SELECT id FROM notification_configs WHERE enabled = 1 LIMIT 1').first();
+      const isGlobalEnabled = !!globalConfig;
 
       const rows = await db.prepare('SELECT * FROM projects').all();
       const allProjects = (rows.results || []).map((row: any) => ({
@@ -1168,7 +1168,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true });
     }
 
-    // 34. 【微信督促引擎】：一键微信督促推送，遍历当天未打卡项目成员批量精准推送 (实现在真机上推送用户手打催促文本的“所见即所得”纯文字微信推送)
+    // 34. 【微信督促引擎】：一键微信督促推送，遍历当天未打卡项目成员批量精准推送 (实现纯手写提醒内容的“所见即所得”纯文字微信推送)
     if (path === '/admin/notifications/trigger-reminder' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
