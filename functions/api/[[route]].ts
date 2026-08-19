@@ -87,7 +87,7 @@ async function ensureTables(db: any) {
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `),
-      // 6. 每日互动留言表
+      // 6. 每日互动留言表 (表名与 schema.sql 对齐为 comments)
       db.prepare(`
         CREATE TABLE IF NOT EXISTS comments (
           id TEXT PRIMARY KEY,
@@ -101,7 +101,7 @@ async function ensureTables(db: any) {
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `),
-      // 7. 好友私信消息表 (表名从 chat_messages 纠正为 messages，列与 schema.sql 完美对齐)
+      // 7. 好友私信消息表 (表名与 schema.sql 对齐为 messages)
       db.prepare(`
         CREATE TABLE IF NOT EXISTS messages (
           id TEXT PRIMARY KEY,
@@ -114,7 +114,7 @@ async function ensureTables(db: any) {
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `),
-      // 8. 微信消息推送配置表 (列与 schema.sql 及 AdminNotificationManager 的表单完美对准)
+      // 8. 微信消息推送配置表 (列与 schema.sql 及 AdminNotificationManager 的表单精准对齐)
       db.prepare(`
         CREATE TABLE IF NOT EXISTS notification_configs (
           id TEXT PRIMARY KEY,
@@ -131,7 +131,7 @@ async function ensureTables(db: any) {
       `),
     ]);
 
-    // 种子数据：如果用户表为空，自动在 D1 数据库中预填入 user1, user2, user3, admin 这4个默认用户，解决“搜不到 user3”的重大体验问题
+    // 种子数据：如果用户表为空，自动在 D1 数据库中预填入 user1, user2, user3, admin 这4个默认用户
     const hasUsers = await db.prepare('SELECT id FROM users LIMIT 1').first();
     if (!hasUsers) {
       await db.prepare(`
@@ -151,7 +151,7 @@ async function ensureTables(db: any) {
       const createdAt = new Date().toISOString();
       await db.prepare(`
         INSERT INTO notification_configs (id, type, name, description, enabled, trigger_time, title_template, content_template, quota_cost_note, created_at)
-        VALUES (?, 'daily_uncheck_reminder', '每日未打卡提醒', '自动检索并推送每日打卡催促通知', 1, '21:00', '⏰ 每日打卡提醒', '【{nickname}】，您参与的项目【{projectTitle}】今天还没有打卡哦，快去完成吧！', '微信实机督促通道', ?)
+        VALUES (?, 'daily_uncheck_reminder', '每日未打卡提醒', '自动检索并推送每日打卡催促通知', 1, '21:00', '⏰ 每日打卡提醒', '您参与的项目今天还没有打卡哦，快去完成吧！', '微信实机督促通道', ?)
       `).bind(cfgId, createdAt).run();
     }
 
@@ -1150,7 +1150,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true });
     }
 
-    // 34. 【微信督促引擎】：一键微信督促推送，遍历当天未打卡项目成员批量精准推送
+    // 34. 【微信督促引擎】：一键微信督促推送，遍历当天未打卡项目成员批量精准推送 (实现纯手写提醒内容的“所见即所得”原文本推送)
     if (path === '/admin/notifications/trigger-reminder' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
@@ -1189,8 +1189,12 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
           }
 
           const sendKey = userObj.send_key;
+          
+          // 纯文字“所见即所得”设计：直接调用项目创建者在前端手打的自定义督促文案，坚决不作任何占位符转义
+          const customMsg = proj.rules?.reminderMessage;
+          const despMsg = customMsg && customMsg.trim() ? customMsg.trim() : `亲爱的 ${userObj.nickname}，您今天尚未在项目【${proj.title}】中打卡，请点击打卡网页及时完成您今天的记录哦！`;
+
           const titleMsg = `微信每日打卡督促：${proj.title}`;
-          const despMsg = `亲爱的 ${userObj.nickname}，您今天尚未在项目【${proj.title}】中打卡，请点击打卡网页及时完成您今天的记录哦！`;
           const serverChanUrl = `https://sctapi.ftqq.com/${sendKey}.send?title=${encodeURIComponent(titleMsg)}&desp=${encodeURIComponent(despMsg)}`;
 
           try {
