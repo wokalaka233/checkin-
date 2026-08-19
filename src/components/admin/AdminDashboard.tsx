@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Users,
   Search,
@@ -15,10 +15,10 @@ import {
   XCircle,
   LogOut,
   RefreshCw,
-  Eye,
-  EyeOff,
   Shield,
   Layers,
+  Play,
+  Pause,
 } from 'lucide-react';
 import { AdminUserSummary, AdminUserDetail, CheckInRecord } from '../../types';
 import { api } from '../../services/api';
@@ -44,7 +44,15 @@ export const AdminDashboard: React.FC = () => {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [userDetail, setUserDetail] = useState<AdminUserDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [activeTab, setActiveTab] = useState<'checkins' | 'projects'>('checkins');
+  
+  // 核心改动 1：支持 chats（私信互动审计）页签
+  const [activeTab, setActiveTab] = useState<'checkins' | 'projects' | 'chats'>('checkins');
+
+  // 新增 1：管理员专属查看用户私信记录的 State
+  const [adminChats, setAdminChats] = useState<any[]>([]);
+  const [loadingChats, setLoadingChats] = useState(false);
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
 
   // Modals state
   const [passwordModalUser, setPasswordModalUser] = useState<{
@@ -106,13 +114,34 @@ export const AdminDashboard: React.FC = () => {
     }
   }, []);
 
+  // 新增 2：拉取指定用户私聊对话流的审计效果 (支持 D1 云端強同步)
+  const fetchUserChats = useCallback(async (userId: string) => {
+    try {
+      setLoadingChats(true);
+      const data = await api.getAdminUserMessages(userId);
+      if (userId === selectedUserIdRef.current) {
+        setAdminChats(data);
+      }
+    } catch (e) {
+      console.error('Failed to load user chats:', e);
+    } finally {
+      if (userId === selectedUserIdRef.current) {
+        setLoadingChats(false);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     if (selectedUserId) {
       fetchUserDetail(selectedUserId);
+      if (activeTab === 'chats') {
+        fetchUserChats(selectedUserId);
+      }
     } else {
       setUserDetail(null);
+      setAdminChats([]);
     }
-  }, [selectedUserId, fetchUserDetail]);
+  }, [selectedUserId, activeTab, fetchUserDetail, fetchUserChats]);
 
   // Delete check-in record
   const handleDeleteCheckIn = async (checkInId: string) => {
@@ -141,6 +170,23 @@ export const AdminDashboard: React.FC = () => {
       }
     } catch (e: any) {
       alert(e.message || '删除失败');
+    }
+  };
+
+  // Play audio
+  const handlePlayAudio = (msgId: string, url: string) => {
+    if (playingAudioId === msgId) {
+      audioPlayerRef.current?.pause();
+      setPlayingAudioId(null);
+    } else {
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      const audio = new Audio(url);
+      audioPlayerRef.current = audio;
+      audio.onended = () => setPlayingAudioId(null);
+      audio.play();
+      setPlayingAudioId(msgId);
     }
   };
 
@@ -452,7 +498,7 @@ export const AdminDashboard: React.FC = () => {
                         账号：@{userDetail.user.username}
                       </div>
                       <div className="text-[11px] text-stone-400 mt-1">
-                        注册时间：{userDetail.user.createdAt ? new Date(userDetail.user.createdAt).toLocaleString() : '云端同步中'}
+                        注册时间：{new Date(userDetail.user.createdAt).toLocaleString()}
                       </div>
                     </div>
                   </div>
@@ -461,7 +507,7 @@ export const AdminDashboard: React.FC = () => {
                     <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs">
                       <span className="text-stone-500">当前存储密码：</span>
                       <span className="font-mono font-bold text-stone-900 ml-1">
-                        {userDetail.user.password || '******'}
+                        {userDetail.user.password || '123456'}
                       </span>
                     </div>
 
@@ -498,6 +544,19 @@ export const AdminDashboard: React.FC = () => {
                     }`}
                   >
                     参与的打卡项目 ({userDetail.projects.length})
+                  </button>
+                  
+                  {/* 核心重构 2：管理台新增“私密聊天记录调阅与审计”Sub Tab 页签 */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('chats')}
+                    className={`px-4 py-2 text-xs font-semibold rounded-lg transition-all ${
+                      activeTab === 'chats'
+                        ? 'bg-white text-stone-900 shadow-xs font-bold'
+                        : 'text-stone-600 hover:text-stone-900'
+                    }`}
+                  >
+                    私聊互动记录 ({adminChats.length})
                   </button>
                 </div>
 
@@ -697,6 +756,92 @@ export const AdminDashboard: React.FC = () => {
                               >
                                 删除项目
                               </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* 核心重构 3：管理员私密聊天记录流多媒体调阅与审计 */}
+                {activeTab === 'chats' && (
+                  <div className="space-y-4">
+                    {loadingChats ? (
+                      <div className="py-12 text-center text-xs text-stone-400">
+                        正在加载该用户私密聊天流水记录...
+                      </div>
+                    ) : adminChats.length === 0 ? (
+                      <div className="py-16 text-center text-xs text-stone-400 bg-white rounded-2xl border border-stone-200">
+                        该用户暂无任何站内私信私聊互动记录。
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {adminChats.map((msg) => (
+                          <div
+                            key={msg.id}
+                            className="bg-white rounded-2xl border border-stone-200 p-5 shadow-xs space-y-3"
+                          >
+                            {/* Message metadata info header */}
+                            <div className="flex items-center justify-between text-xs border-b border-stone-100 pb-2.5 flex-wrap gap-2">
+                              <div className="flex items-center gap-2">
+                                <img
+                                  src={msg.senderAvatar}
+                                  alt=""
+                                  className="w-5 h-5 rounded-full object-cover border border-stone-100"
+                                />
+                                <span className="font-bold text-stone-900">{msg.senderNickname}</span>
+                                <span className="text-stone-400 font-medium">私聊发送给</span>
+                                <img
+                                  src={msg.receiverAvatar}
+                                  alt=""
+                                  className="w-5 h-5 rounded-full object-cover border border-stone-100"
+                                />
+                                <span className="font-bold text-stone-900">{msg.receiverNickname}</span>
+                              </div>
+
+                              <span className="text-stone-400 font-mono text-[10px]">
+                                {new Date(msg.createdAt).toLocaleString()}
+                              </span>
+                            </div>
+
+                            {/* Message content stream decryption view */}
+                            <div className="pl-7 text-xs text-stone-800 leading-relaxed whitespace-pre-wrap break-words">
+                              {/* Text content */}
+                              {msg.type === 'text' && <span>{msg.content}</span>}
+
+                              {/* Image content */}
+                              {msg.type === 'image' && (
+                                <div onClick={() => setLightboxImage(msg.content)} className="max-w-xs cursor-pointer">
+                                  <img
+                                    src={msg.content}
+                                    alt=""
+                                    className="max-h-36 rounded-xl object-cover border border-stone-200 hover:scale-[1.02] transition-transform"
+                                  />
+                                </div>
+                              )}
+
+                              {/* Voice record audio player */}
+                              {msg.type === 'audio' && (
+                                <div
+                                  onClick={() => handlePlayAudio(msg.id, msg.content)}
+                                  className="flex items-center gap-3 p-2 bg-stone-50 rounded-xl border border-stone-200 w-fit cursor-pointer select-none"
+                                >
+                                  <button
+                                    type="button"
+                                    className="w-6 h-6 rounded-full bg-stone-900 text-white flex items-center justify-center"
+                                  >
+                                    {playingAudioId === msg.id ? (
+                                      <Pause className="w-2.5 h-2.5 fill-current" />
+                                    ) : (
+                                      <Play className="w-2.5 h-2.5 fill-current ml-0.5" />
+                                    )}
+                                  </button>
+                                  <span className="font-mono text-[10px] text-stone-600">
+                                    私聊语音录音 ({msg.audioDuration}秒)
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           </div>
                         ))}
