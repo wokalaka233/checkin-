@@ -299,66 +299,68 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
                   />
                 </div>
 
-                {/* Creator Custom Reminder Settings */}
-                <div className="pt-2 border-t border-stone-200 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Bell className="w-4 h-4 text-emerald-600" />
-                      <span className="text-xs font-bold text-stone-800">微信每日提醒设置</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        id="checkbox-settings-reminder-toggle"
-                        type="checkbox"
-                        disabled={!isCreator}
-                        checked={reminderEnabled}
-                        onChange={(e) => setReminderEnabled(e.target.checked)}
-                        className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-stone-300 disabled:opacity-50"
-                      />
-                      <label
-                        htmlFor="checkbox-settings-reminder-toggle"
-                        className="text-xs text-stone-700 font-semibold cursor-pointer"
-                      >
-                        开启每日催促
-                      </label>
-                    </div>
-                  </div>
-
-                  {reminderEnabled && (
-                    <div className="p-3.5 bg-emerald-50/50 border border-emerald-200/80 rounded-2xl space-y-3">
-                      <div>
-                        <label className="block text-[11px] font-bold text-stone-700 mb-1">
-                          每日提醒推送时间
-                        </label>
+                {/* Creator Custom Reminder Settings - 完美联动 D1 全局 enabled 状态，通道关闭时在此弹窗中也实现无痕隐形、不占行 */}
+                {project.globalReminderEnabled !== false && (
+                  <div className="pt-2 border-t border-stone-200 space-y-3 animate-in fade-in duration-100">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Bell className="w-4 h-4 text-emerald-600" />
+                        <span className="text-xs font-bold text-stone-800">微信每日提醒设置</span>
+                      </div>
+                      <div className="flex items-center gap-2">
                         <input
-                          type="time"
+                          id="checkbox-settings-reminder-toggle"
+                          type="checkbox"
                           disabled={!isCreator}
-                          value={reminderTime}
-                          onChange={(e) => setReminderTime(e.target.value)}
-                          className="px-3 py-1.5 bg-white border border-stone-200 rounded-xl text-xs text-stone-900 font-mono font-medium focus:outline-none focus:ring-2 focus:ring-emerald-600 disabled:opacity-50"
+                          checked={reminderEnabled}
+                          onChange={(e) => setReminderEnabled(e.target.checked)}
+                          className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-stone-300 disabled:opacity-50"
                         />
-                        <span className="text-[10px] text-stone-500 ml-2">
-                          若成员到此时仍未达标，将通过微信通知通道提醒
-                        </span>
-                      </div>
-
-                      {/* 微信自定义催促文案输入框 - 实现纯文字所见即所得设计且移除了微信催促文本框下方的多余提示句 */}
-                      <div>
-                        <label className="block text-[11px] font-bold text-stone-700 mb-1">
-                          微信自定义催促文案
+                        <label
+                          htmlFor="checkbox-settings-reminder-toggle"
+                          className="text-xs text-stone-700 font-semibold cursor-pointer"
+                        >
+                          开启每日催促
                         </label>
-                        <textarea
-                          rows={2}
-                          disabled={!isCreator}
-                          value={reminderMessage}
-                          onChange={(e) => setReminderMessage(e.target.value)}
-                          placeholder="今天不要忘记打卡哦，快去完成吧！"
-                          className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-stone-900 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600 resize-none disabled:opacity-50"
-                        />
                       </div>
                     </div>
-                  )}
-                </div>
+
+                    {reminderEnabled && (
+                      <div className="p-3.5 bg-emerald-50/50 border border-emerald-200/80 rounded-2xl space-y-3">
+                        <div>
+                          <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                            每日提醒推送时间
+                          </label>
+                          <input
+                            type="time"
+                            disabled={!isCreator}
+                            value={reminderTime}
+                            onChange={(e) => setReminderTime(e.target.value)}
+                            className="px-3 py-1.5 bg-white border border-stone-200 rounded-xl text-xs text-stone-900 font-mono font-medium focus:outline-none focus:ring-2 focus:ring-emerald-600 disabled:opacity-50"
+                          />
+                          <span className="text-[10px] text-stone-500 ml-2">
+                            若成员到此时仍未达标，将通过微信通知通道提醒
+                          </span>
+                        </div>
+
+                        {/* 微信自定义催促文案 - 所见即所得，打字输入什么就发送什么，且彻底移除了下方的多余提示标签 */}
+                        <div>
+                          <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                            微信自定义催促文案
+                          </label>
+                          <textarea
+                            rows={2}
+                            disabled={!isCreator}
+                            value={reminderMessage}
+                            onChange={(e) => setReminderMessage(e.target.value)}
+                            placeholder="今天不要忘记打卡哦，快去完成吧！"
+                            className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-stone-900 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600 resize-none disabled:opacity-50"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {isCreator && (
