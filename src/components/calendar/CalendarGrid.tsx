@@ -35,7 +35,13 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
 
   // Format month string: 'YYYY年MM月'
   const monthDisplay = `${year}年${month + 1}月`;
-  const todayStr = new Date().toISOString().slice(0, 10);
+  
+  // 核心修复：采用本地安全时间戳计算，取代 ISOString UTC 零时区切片，彻底根治清晨测试时日历黑圈错标至昨天的时区时差缺陷
+  const today = new Date();
+  const tYear = today.getFullYear();
+  const tMonth = today.getMonth() + 1;
+  const tDay = today.getDate();
+  const todayStr = `${tYear}-${tMonth < 10 ? '0' + tMonth : tMonth}-${tDay < 10 ? '0' + tDay : tDay}`;
 
   // Calculate calendar grid days
   const firstDayOfMonth = new Date(year, month, 1);
@@ -165,10 +171,11 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
             >
               {/* Day header row */}
               <div className="flex items-center justify-between w-full">
+                {/* 今天的高亮圆圈样式：精准更正为数字外层套一个空心小圆圈，保持数字深灰色可读，杜绝黑色实心高亮背景 */}
                 <span
                   className={`text-xs font-bold leading-none ${
                     isToday
-                      ? 'w-5 h-5 rounded-full bg-stone-900 text-white flex items-center justify-center text-[11px]'
+                      ? 'w-5 h-5 rounded-full border border-stone-900 text-stone-900 flex items-center justify-center text-[10px] font-black'
                       : 'text-stone-800'
                   }`}
                 >
