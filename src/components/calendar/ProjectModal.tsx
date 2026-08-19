@@ -28,7 +28,10 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
 }) => {
   const { user } = useAuth();
   const [title, setTitle] = useState('');
-  const [isProxy, setIsProxy] = useState(false);
+  
+  // 核心改动：左边为“个人打卡”，右边为“共同打卡”。默认 !isGroup (即个人打卡)
+  const [isGroup, setIsGroup] = useState(false);
+  
   const [friends, setFriends] = useState<FriendUser[]>([]);
   const [selectedFriendIds, setSelectedFriendIds] = useState<string[]>([]);
   const [creatorParticipates, setCreatorParticipates] = useState(true);
@@ -45,14 +48,14 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [reminderEnabled, setReminderEnabled] = useState(true);
   const [reminderTime, setReminderTime] = useState('21:00');
   
-  // 新增：所见即所得的微信催促原文本内容状态
+  // 纯手打“所见即所得”的微信每日催促内容状态，云端强同步
   const [reminderMessage, setReminderMessage] = useState('今天不要忘记打卡哦，快去完成吧！');
 
   useEffect(() => {
     if (isOpen) {
       loadFriends();
       setTitle('');
-      setIsProxy(false);
+      setIsGroup(false);
       setSelectedFriendIds([]);
       setCreatorParticipates(true);
       setReminderMessage('今天不要忘记打卡哦，快去完成吧！');
@@ -87,7 +90,11 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       return;
     }
 
-    if (selectedFriendIds.length === 0 && !creatorParticipates) {
+    // 在提交时，如果选“个人打卡”，强制清空好友并设置自己参与，规避异常脏状态
+    const finalFriendIds = isGroup ? selectedFriendIds : [];
+    const finalCreatorParticipates = isGroup ? creatorParticipates : true;
+
+    if (isGroup && finalFriendIds.length === 0 && !finalCreatorParticipates) {
       setError('必须至少选择一位打卡成员或本人参与打卡');
       return;
     }
@@ -109,9 +116,9 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
     try {
       const project = await api.createProject({
         title: title.trim(),
-        isProxy,
-        selectedFriendIds,
-        creatorParticipates,
+        isProxy: isGroup && !finalCreatorParticipates, // 代理模式自动映射
+        selectedFriendIds: finalFriendIds,
+        creatorParticipates: finalCreatorParticipates,
         rules,
       });
       onSuccess(project);
@@ -131,15 +138,14 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
         className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
+        {/* Header - 修改主标题、完全移除副标题 */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-stone-100 bg-stone-50/50">
           <div className="flex items-center gap-2">
             <div className="p-2 bg-stone-900 text-white rounded-xl">
               <Sparkles className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-stone-900">新建自律打卡项目</h2>
-              <p className="text-xs text-stone-500">创建专属打卡规则与火苗契约</p>
+              <h2 className="text-lg font-bold text-stone-900">新建打卡项目</h2>
             </div>
           </div>
           <button
@@ -158,7 +164,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
             </div>
           )}
 
-          {/* Project Title */}
+          {/* Project Title - 移除 placeholder 灰色参考字 */}
           <div>
             <label className="block text-xs font-semibold text-stone-700 mb-1.5">
               项目名称 *
@@ -166,139 +172,125 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
             <input
               type="text"
               required
-              placeholder="例如：每日晨跑 5 公里 / 英语单词 50 个"
+              placeholder=""
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-stone-900 placeholder:text-stone-400 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900 focus:bg-white transition-all"
+              className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl text-stone-900 text-sm focus:outline-none focus:ring-2 focus:ring-stone-900 focus:bg-white transition-all"
             />
           </div>
 
-          {/* Mode Selector: Self vs Proxy */}
+          {/* Mode Selector - 极简“个人打卡”和“共同打卡”选项 */}
           <div className="grid grid-cols-2 gap-3">
             <button
               type="button"
-              onClick={() => setIsProxy(false)}
+              onClick={() => setIsGroup(false)}
               className={`p-3 rounded-2xl border text-left transition-all ${
-                !isProxy
+                !isGroup
                   ? 'border-stone-900 bg-stone-900 text-white shadow-sm'
                   : 'border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-700'
               }`}
             >
-              <div className="text-xs font-bold mb-0.5">普通打卡 / 组队打卡</div>
-              <div
-                className={`text-[10px] ${
-                  !isProxy ? 'text-stone-300' : 'text-stone-400'
-                }`}
-              >
-                自己打卡或与好友共同监督
+              <div className="text-xs font-bold mb-0.5">个人打卡</div>
+              <div className={`text-[10px] ${!isGroup ? 'text-stone-300' : 'text-stone-400'}`}>
+                自己独立打卡记录日常
               </div>
             </button>
 
             <button
               type="button"
-              onClick={() => setIsProxy(true)}
+              onClick={() => setIsGroup(true)}
               className={`p-3 rounded-2xl border text-left transition-all ${
-                isProxy
+                isGroup
                   ? 'border-stone-900 bg-stone-900 text-white shadow-sm'
                   : 'border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-700'
               }`}
             >
               <div className="text-xs font-bold mb-0.5 flex items-center gap-1">
-                代理打卡模式
-                <span
-                  className={`text-[9px] px-1.5 py-0.2 rounded-full ${
-                    isProxy
-                      ? 'bg-amber-400 text-stone-900 font-bold'
-                      : 'bg-stone-200 text-stone-600'
-                  }`}
-                >
-                  专属
-                </span>
+                共同打卡
               </div>
-              <div
-                className={`text-[10px] ${
-                  isProxy ? 'text-stone-300' : 'text-stone-400'
-                }`}
-              >
-                帮他人或多成员代记打卡
+              <div className={`text-[10px] ${isGroup ? 'text-stone-300' : 'text-stone-400'}`}>
+                邀请好友共同监督或帮人代记
               </div>
             </button>
           </div>
 
-          {/* Member Selection if not purely solo */}
-          <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200/80 space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-semibold text-stone-700 flex items-center gap-1.5">
-                <Users className="w-4 h-4 text-stone-500" />
-                选择打卡成员 (多选)
-              </label>
-              <span className="text-[10px] text-stone-400">
-                已选择 {selectedFriendIds.length} 位
-              </span>
-            </div>
-
-            {fetchingFriends ? (
-              <div className="py-6 text-center text-xs text-stone-400">加载好友中...</div>
-            ) : friends.length === 0 ? (
-              <div className="py-6 px-3 text-center text-xs text-stone-500 bg-white rounded-xl border border-stone-200">
-                暂无已添加的好友，请先在【好友与私聊】中添加好友
+          {/* Member Selection - 只有选择“共同打卡”时才在前端展现，个人打卡自动隐藏 */}
+          {isGroup && (
+            <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-stone-700 flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-stone-500" />
+                  选择打卡成员 (多选)
+                </label>
+                <span className="text-[10px] text-stone-400">
+                  已选择 {selectedFriendIds.length} 位
+                </span>
               </div>
-            ) : (
-              <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
-                {friends.map((friend) => {
-                  const isSelected = selectedFriendIds.includes(friend.id);
-                  return (
-                    <button
-                      key={friend.id}
-                      type="button"
-                      onClick={() => handleToggleFriend(friend.id)}
-                      className={`w-full flex items-center justify-between p-2 rounded-lg text-xs transition-colors ${
-                        isSelected
-                          ? 'bg-stone-900 text-white font-medium'
-                          : 'bg-white hover:bg-stone-100 text-stone-700 border border-stone-200'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        <img
-                          src={
-                            friend.avatar ||
-                            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'
-                          }
-                          alt=""
-                          className="w-6 h-6 rounded-full object-cover"
-                        />
-                        <span>{friend.nickname}</span>
-                        <span
-                          className={`text-[10px] ${
-                            isSelected ? 'text-stone-300' : 'text-stone-400'
-                          }`}
-                        >
-                          (@{friend.username})
-                        </span>
-                      </div>
-                      {isSelected && <Check className="w-4 h-4 text-white" />}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
 
-            <div className="pt-2 border-t border-stone-200 flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="creatorParticipates"
-                checked={creatorParticipates}
-                onChange={(e) => setCreatorParticipates(e.target.checked)}
-                className="w-4 h-4 text-stone-900 bg-stone-100 border-stone-300 rounded focus:ring-stone-900"
-              />
-              <label
-                htmlFor="creatorParticipates"
-                className="text-xs text-stone-600 select-none cursor-pointer"
-              >
-                是否我也参与打卡 (勾选后全员完全同步可见)
-              </label>
+              {fetchingFriends ? (
+                <div className="py-6 text-center text-xs text-stone-400">加载好友中...</div>
+              ) : friends.length === 0 ? (
+                <div className="py-6 px-3 text-center text-xs text-stone-500 bg-white rounded-xl border border-stone-200">
+                  暂无已添加的好友，请先在【好友与私聊】中添加好友
+                </div>
+              ) : (
+                <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                  {friends.map((friend) => {
+                    const isSelected = selectedFriendIds.includes(friend.id);
+                    return (
+                      <button
+                        key={friend.id}
+                        type="button"
+                        onClick={() => handleToggleFriend(friend.id)}
+                        className={`w-full flex items-center justify-between p-2 rounded-lg text-xs transition-colors ${
+                          isSelected
+                            ? 'bg-stone-900 text-white font-medium'
+                            : 'bg-white hover:bg-stone-100 text-stone-700 border border-stone-200'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <img
+                            src={
+                              friend.avatar ||
+                              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'
+                            }
+                            alt=""
+                            className="w-6 h-6 rounded-full object-cover"
+                          />
+                          <span>{friend.nickname}</span>
+                          <span
+                            className={`text-[10px] ${
+                              isSelected ? 'text-stone-300' : 'text-stone-400'
+                            }`}
+                          >
+                            (@{friend.username})
+                          </span>
+                        </div>
+                        {isSelected && <Check className="w-4 h-4 text-white" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* 只有“共同打卡”才展现该选项，且去除尾部的括号及内容 */}
+              <div className="pt-2 border-t border-stone-200 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="creatorParticipates"
+                  checked={creatorParticipates}
+                  onChange={(e) => setCreatorParticipates(e.target.checked)}
+                  className="w-4 h-4 text-stone-900 bg-stone-100 border-stone-300 rounded focus:ring-stone-900"
+                />
+                <label
+                  htmlFor="creatorParticipates"
+                  className="text-xs text-stone-600 select-none cursor-pointer"
+                >
+                  是否我也参与打卡
+                </label>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Qualification Rules */}
           <div className="space-y-3">
@@ -415,7 +407,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                   />
                 </div>
 
-                {/* 微信自定义催促文案输入框 - 实现纯文字所见即所得设计 */}
+                {/* 微信自定义催促文案输入框 - 实现纯文字所见即所得设计且移除了微信催促文本框下方的多余提示句 */}
                 <div>
                   <label className="block text-[11px] font-bold text-amber-900 mb-1">
                     微信自定义催促文案
@@ -427,9 +419,6 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
                     placeholder="今天不要忘记打卡哦，快去完成吧！"
                     className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-stone-900 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none"
                   />
-                  <p className="text-[10px] text-amber-700/80 mt-0.5 leading-relaxed">
-                    在文本框中输入什么字，系统推送时就会微信一字不差地精准发送给成员。
-                  </p>
                 </div>
               </div>
             )}
