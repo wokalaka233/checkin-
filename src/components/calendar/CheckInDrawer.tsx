@@ -103,7 +103,6 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
   if (!isOpen) return null;
 
   const rules = project.rules || {};
-  const myExistingRecord = records.find((r) => r.userId === user?.id);
 
   // Rule verification check
   const meetsPhotoRule = !rules.requirePhotos || photos.length >= (rules.minPhotos || 1);
@@ -143,7 +142,7 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
     reader.readAsDataURL(file);
   };
 
-  // Handle Check-in submit
+  // Handle Check-in submit (加入可选链及两端防御锁，解决 Cannot read properties of undefined 报错)
   const handleSubmitCheckIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError('');
@@ -160,7 +159,8 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
         text: text.trim(),
       });
 
-      if (res.record.isQualified) {
+      // 增加两端接口对齐安全校验防御
+      if (res && res.record && res.record.isQualified) {
         setSubmitSuccess('恭喜打卡达标！火花已更新 🔥');
       } else {
         setSubmitSuccess('打卡已提交（部分未达标，火花保持不变）🟡');
@@ -420,7 +420,7 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
                   <h3 className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
                     <Flame className="w-3.5 h-3.5 text-orange-500" />
                     <span>
-                      {myExistingRecord ? '修改我的打卡' : '提交今日打卡'}
+                      {records.some((r) => r.userId === user?.id) ? '修改我的打卡' : '提交今日打卡'}
                     </span>
                   </h3>
                   <span
@@ -665,7 +665,7 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
                       <>
                         <CheckCircle2 className="w-4 h-4" />
                         <span>
-                          {myExistingRecord ? '更新打卡并核算火花' : '提交打卡并核算火花'}
+                          {records.some((r) => r.userId === user?.id) ? '更新打卡并核算火花' : '提交打卡并核算火花'}
                         </span>
                       </>
                     )}
@@ -763,7 +763,7 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
                       value={commentInput}
                       onChange={(e) => setCommentInput(e.target.value)}
                       placeholder={replyTarget ? `回复 @${replyTarget.nickname}...` : '参与当日全员讨论...'}
-                      className={`flex-1 px-3.5 py-2.5 bg-stone-50 border border-stone-200 text-stone-900 text-xs focus:outline-none focus:ring-2 focus:ring-stone-900 focus:bg-white ${
+                      className={`flex-1 px-3.5 py-2 bg-stone-50 border border-stone-200 text-stone-900 text-xs focus:outline-none focus:ring-2 focus:ring-stone-900 focus:bg-white ${
                         replyTarget ? 'rounded-b-xl' : 'rounded-xl'
                       }`}
                     />
