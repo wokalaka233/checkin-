@@ -151,7 +151,7 @@ async function ensureTables(db: any) {
       const createdAt = new Date().toISOString();
       await db.prepare(`
         INSERT INTO notification_configs (id, type, name, description, enabled, trigger_time, title_template, content_template, quota_cost_note, created_at)
-        VALUES (?, 'daily_uncheck_reminder', '每日未打卡提醒', '自动检索并推送每日打卡催促通知', 1, '21:00', '⏰ 每日打卡提醒', '您参与的项目今天还没有打卡哦，快去完成吧！', '微信实机督促通道', ?)
+        VALUES (?, 'daily_uncheck_reminder', '每日未打卡提醒', '自动检索并推送每日打卡督促通知', 1, '21:00', '⏰ 每日打卡提醒', '您参与的项目今天还没有打卡哦，快去完成吧！', '微信实机督促通道', ?)
       `).bind(cfgId, createdAt).run();
     }
 
@@ -349,10 +349,14 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       }
     }
 
-    // 6. 打卡项目列表：查询云端项目
+    // 6. 打卡项目列表：查询云端项目且动态注入云开关状态 (解决管理后台一关、用户端角标同步消失问题)
     if (path === '/projects/list' && method === 'GET') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse([]);
+
+      // 实时获取 D1 云端关于每日督促的全局配置开启状态
+      const globalConfig = await db.prepare('SELECT enabled FROM notification_configs WHERE type = ?').bind('daily_uncheck_reminder').first();
+      const isGlobalEnabled = globalConfig ? globalConfig.enabled === 1 : true;
 
       const rows = await db.prepare('SELECT * FROM projects').all();
       const allProjects = (rows.results || []).map((row: any) => ({
@@ -368,7 +372,10 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
 
       const myProjects = allProjects.filter((p: any) =>
         p.members.includes(currentUser.id) || p.creatorId === currentUser.id
-      );
+      ).map((p: any) => ({
+        ...p,
+        globalReminderEnabled: isGlobalEnabled, // 动态注入 D1 数据库全局开关，实现全栈无缝联动
+      }));
 
       return jsonResponse(myProjects);
     }
@@ -574,7 +581,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
         content: row.content,
         replyToCommentId: row.reply_to_comment_id,
         replyToNickname: row.reply_to_nickname,
-        createdAt: row.created_at,
+        createdAt: row.created_at
       }));
 
       return jsonResponse({ date, records, comments });
@@ -1150,7 +1157,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true });
     }
 
-    // 34. 【微信督促引擎】：一键微信督促推送，遍历当天未打卡项目成员批量精准推送 (实现纯手写提醒内容的“所见即所得”原文本推送)
+    // 34. 【微信督促引擎】：一键微信督促推送，遍历当天未打卡项目成员批量精准推送 (实现在真机上推送用户手打催促文本的“所见即所得”纯文字微信推送)
     if (path === '/admin/notifications/trigger-reminder' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
@@ -1190,9 +1197,9 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
 
           const sendKey = userObj.send_key;
           
-          // 纯文字“所见即所得”设计：直接调用项目创建者在前端手打的自定义督促文案，坚决不作任何占位符转义
+          // 纯文本“所见即所得”设计：直接提取并在微信中推送用户在前端手打的督促话语，绝不使用占位符，若无则使用系统默认督促语
           const customMsg = proj.rules?.reminderMessage;
-          const despMsg = customMsg && customMsg.trim() ? customMsg.trim() : `亲爱的 ${userObj.nickname}，您今天尚未在项目【${proj.title}】中打卡，请点击打卡网页及时完成您今天的记录哦！`;
+          const despMsg = customMsg && customMsg.trim() ? customMsg.trim() : `亲爱的 ${userObj.nickname}，您今天尚未在自律项目【${proj.title}】中打卡哦！请点击网页及时完成您今天的记录吧！`;
 
           const titleMsg = `微信每日打卡督促：${proj.title}`;
           const serverChanUrl = `https://sctapi.ftqq.com/${sendKey}.send?title=${encodeURIComponent(titleMsg)}&desp=${encodeURIComponent(despMsg)}`;
