@@ -11,6 +11,10 @@ export const AuthCard: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  // 新增：彩蛋状态，计数器与显隐标志，实现点击 5 次展示快捷入口
+  const [clickCount, setClickCount] = useState(0);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -40,6 +44,15 @@ export const AuthCard: React.FC = () => {
     setPassword(p);
     setTab('login');
     setError('');
+  };
+
+  // 微信彩蛋点击累加机制：每点击一次累加1，达到 5 次后自动开启微信快捷入口并更新灰色小字
+  const handleEasterEggClick = () => {
+    const nextCount = clickCount + 1;
+    setClickCount(nextCount);
+    if (nextCount >= 5) {
+      setShowShortcuts(true);
+    }
   };
 
   return (
@@ -163,32 +176,40 @@ export const AuthCard: React.FC = () => {
           </button>
         </form>
 
-        {/* Demo Fast Switch Pill bar */}
-        <div className="mt-6 pt-4 border-t border-stone-100 text-center">
-          <p className="text-[11px] text-stone-400 mb-2">快速填入测试账号</p>
-          <div className="flex items-center justify-center gap-2">
-            <button
-              type="button"
-              onClick={() => handleQuickFill('user1', '123456')}
-              className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg text-xs font-medium transition-colors"
-            >
-              打卡先锋
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickFill('user2', '123456')}
-              className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg text-xs font-medium transition-colors"
-            >
-              晨跑小鹿
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickFill('user3', '123456')}
-              className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg text-xs font-medium transition-colors"
-            >
-              读书伴侣
-            </button>
-          </div>
+        {/* Demo Fast Switch Pill bar - 彩蛋改造：默认隐形，且文字更改为wokalaka匠心制作，点击5次展开 */}
+        <div className="mt-6 pt-4 border-t border-stone-100 text-center select-none">
+          <p 
+            onClick={handleEasterEggClick}
+            className="text-[11px] text-stone-400 mb-2 cursor-pointer hover:text-stone-600 transition-colors font-medium"
+          >
+            {showShortcuts ? '快速填入测试账号' : 'wokalaka匠心制作'}
+          </p>
+          
+          {showShortcuts && (
+            <div className="flex items-center justify-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <button
+                type="button"
+                onClick={() => handleQuickFill('user1', '123456')}
+                className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg text-xs font-medium transition-colors"
+              >
+                打卡先锋
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickFill('user2', '123456')}
+                className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg text-xs font-medium transition-colors"
+              >
+                晨跑小鹿
+              </button>
+              <button
+                type="button"
+                onClick={() => handleQuickFill('user3', '123456')}
+                className="px-2.5 py-1 bg-stone-100 hover:bg-stone-200 text-stone-700 rounded-lg text-xs font-medium transition-colors"
+              >
+                读书伴侣
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
