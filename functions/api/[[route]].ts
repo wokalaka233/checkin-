@@ -485,13 +485,24 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ month, project: proj, days });
     }
 
-    // 9. 提交打卡：写入云端记录并在响应中返回 record 数据
+    // 9. 提交打卡：写入云端记录，并实施【防作弊 24 点截止限制拦截】
     if (path === '/checkins/submit' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse({ error: '未登录' }, 401);
 
       const body = await request.json().catch(() => ({}));
       const { projectId, date, photos, videos, audios, text } = body;
+      
+      // 获取东八区北京时间当天的日期 'YYYY-MM-DD'，实施双层安全校验
+      const tzOffset = 8 * 60 * 60 * 1000;
+      const bjTime = new Date(Date.now() + tzOffset);
+      const todayStr = bjTime.toISOString().slice(0, 10);
+
+      // 防作弊核心校验：如果普通用户企图通过网络发包篡改历史日期或提交未来打卡，直接拒绝
+      if (date !== todayStr && !currentUser.isAdmin) {
+        return jsonResponse({ error: '打卡通道已关闭：普通成员仅能提交当天打卡（每日截止至当天 24:00）' }, 400);
+      }
+
       const isQualified = (photos?.length || 0) >= 1 || !!text ? 1 : 0;
       const recordId = 'rec_' + Date.now();
       const createdAt = new Date().toISOString();
@@ -1199,7 +1210,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
           
           // 纯文本“所见即所得”设计：直接提取并在微信中推送用户在前端手打的督促话语，绝不使用占位符，若无则使用系统默认督促语
           const customMsg = proj.rules?.reminderMessage;
-          const despMsg = customMsg && customMsg.trim() ? customMsg.trim() : `亲爱的 ${userObj.nickname}，您今天尚未在自律项目【${proj.title}】中打卡哦！请点击网页及时完成您今天的记录吧！`;
+          const despMsg = customMsg && customMsg.trim() ? customMsg.trim() : `亲爱的 ${userObj.nickname}，您今天尚未在项目【${proj.title}】中打卡，请点击打卡网页及时完成您今天的记录吧！`;
 
           const titleMsg = `微信每日打卡督促：${proj.title}`;
           const serverChanUrl = `https://sctapi.ftqq.com/${sendKey}.send?title=${encodeURIComponent(titleMsg)}&desp=${encodeURIComponent(despMsg)}`;
