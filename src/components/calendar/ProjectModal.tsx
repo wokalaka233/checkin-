@@ -13,7 +13,6 @@ import {
   Video,
   Mic,
   FileText,
-  HelpCircle
 } from 'lucide-react';
 
 interface ProjectModalProps {
@@ -45,6 +44,9 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
   const [requireText, setRequireText] = useState(true);
   const [reminderEnabled, setReminderEnabled] = useState(true);
   const [reminderTime, setReminderTime] = useState('21:00');
+  
+  // 新增：所见即所得的微信催促原文本内容状态
+  const [reminderMessage, setReminderMessage] = useState('今天不要忘记打卡哦，快去完成吧！');
 
   useEffect(() => {
     if (isOpen) {
@@ -53,6 +55,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       setIsProxy(false);
       setSelectedFriendIds([]);
       setCreatorParticipates(true);
+      setReminderMessage('今天不要忘记打卡哦，快去完成吧！');
       setError(null);
     }
   }, [isOpen]);
@@ -100,6 +103,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
       requireText,
       reminderEnabled,
       reminderTime: reminderEnabled ? reminderTime : undefined,
+      reminderMessage: reminderEnabled ? reminderMessage.trim() : undefined, // 写入 D1 规则 JSON 中云端同步
     };
 
     try {
@@ -233,7 +237,9 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               </span>
             </div>
 
-            {friends.length === 0 ? (
+            {fetchingFriends ? (
+              <div className="py-6 text-center text-xs text-stone-400">加载好友中...</div>
+            ) : friends.length === 0 ? (
               <div className="py-6 px-3 text-center text-xs text-stone-500 bg-white rounded-xl border border-stone-200">
                 暂无已添加的好友，请先在【好友与私聊】中添加好友
               </div>
@@ -383,7 +389,7 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
               <div className="flex items-center gap-2">
                 <Bell className="w-4 h-4 text-amber-600" />
                 <span className="text-xs font-bold text-amber-900">
-                  每日打卡提醒 (ServerChan 微信推送)
+                  微信每日打卡督促 (ServerChan 微信推送)
                 </span>
               </div>
               <input
@@ -395,21 +401,40 @@ export const ProjectModal: React.FC<ProjectModalProps> = ({
             </div>
 
             {reminderEnabled && (
-              <div className="flex items-center justify-between pt-2 border-t border-amber-200/50">
-                <span className="text-xs text-amber-800 flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5" />
-                  每日提醒时间:
-                </span>
-                <input
-                  type="time"
-                  value={reminderTime}
-                  onChange={(e) => setReminderTime(e.target.value)}
-                  className="bg-white border border-amber-200 text-stone-900 rounded-lg px-2.5 py-1 text-xs focus:ring-1 focus:ring-amber-500"
-                />
+              <div className="space-y-3 pt-2 border-t border-amber-200/50">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-amber-800 flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5" />
+                    每日催促时间:
+                  </span>
+                  <input
+                    type="time"
+                    value={reminderTime}
+                    onChange={(e) => setReminderTime(e.target.value)}
+                    className="bg-white border border-amber-200 text-stone-900 rounded-lg px-2.5 py-1 text-xs focus:ring-1 focus:ring-amber-500"
+                  />
+                </div>
+
+                {/* 微信自定义催促文案输入框 - 实现纯文字所见即所得设计 */}
+                <div>
+                  <label className="block text-[11px] font-bold text-amber-900 mb-1">
+                    微信自定义催促文案
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={reminderMessage}
+                    onChange={(e) => setReminderMessage(e.target.value)}
+                    placeholder="今天不要忘记打卡哦，快去完成吧！"
+                    className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-stone-900 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 resize-none"
+                  />
+                  <p className="text-[10px] text-amber-700/80 mt-0.5 leading-relaxed">
+                    在文本框中输入什么字，系统推送时就会微信一字不差地精准发送给成员。
+                  </p>
+                </div>
               </div>
             )}
             <p className="text-[10px] text-amber-700/80 leading-relaxed">
-              开启后，若当日在此时间前未达标，系统将自动向绑定 SendKey 的成员发送微信打卡提醒。
+              开启后，若当日在此时间前未达标，系统将自动向绑定 SendKey 的成员发送微信打卡督促。
             </p>
           </div>
         </form>
