@@ -19,6 +19,8 @@ import {
   Layers,
   Play,
   Pause,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { AdminUserSummary, AdminUserDetail, CheckInRecord, HabitProject } from '../../types';
 import { api } from '../../services/api';
