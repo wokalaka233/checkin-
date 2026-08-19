@@ -160,7 +160,7 @@ async function ensureTables(db: any) {
   }
 }
 
-// 获取当前登录用户
+// 获取当前登录用户 (更正 sendKey 属性名为 serverchanSendKey，精准对接前端 React 数据状态)
 async function getCurrentUser(request: Request, db: any) {
   const authHeader = request.headers.get('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -189,7 +189,7 @@ async function getCurrentUser(request: Request, db: any) {
         avatar,
         role,
         isAdmin: isAdmin === 1,
-        sendKey: null,
+        serverchanSendKey: null,
       };
     }
     return null;
@@ -201,7 +201,7 @@ async function getCurrentUser(request: Request, db: any) {
     avatar: user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`,
     role: user.role || 'user',
     isAdmin: user.is_admin === 1 || user.role === 'admin' || user.username === 'admin',
-    sendKey: user.send_key,
+    serverchanSendKey: user.send_key, // 修正接口属性，让前端刷新重载时可获取密钥状态
   };
 }
 
@@ -256,7 +256,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
 
       const token = 'token_' + username;
       return jsonResponse({
-        user: { id: userId, username, nickname: userNick, avatar, role, isAdmin: isAdmin === 1 },
+        user: { id: userId, username, nickname: userNick, avatar, role, isAdmin: isAdmin === 1, serverchanSendKey: null },
         token,
       });
     }
@@ -278,7 +278,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
           INSERT INTO users (id, username, password, nickname, avatar, role, is_admin)
           VALUES (?, ?, ?, ?, ?, ?, ?)
         `).bind(userId, username, password, nick, avatar, role, isAdmin).run();
-        user = { id: userId, username, password, nickname: nick, avatar, role, is_admin: isAdmin };
+        user = { id: userId, username, password, nickname: nick, avatar, role, is_admin: isAdmin, send_key: null };
       }
 
       if (!user || user.password !== password) {
@@ -294,6 +294,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
           avatar: user.avatar,
           role: user.role || 'user',
           isAdmin: user.is_admin === 1 || user.username === 'admin',
+          serverchanSendKey: user.send_key,
         },
         token,
       });
@@ -325,7 +326,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
 
       const body = await request.json().catch(() => ({}));
       const { sendKey } = body;
-      const actualKey = sendKey || currentUser.sendKey;
+      const actualKey = sendKey || currentUser.serverchanSendKey;
 
       if (!actualKey) {
         return jsonResponse({ error: '未检测到绑定的 SendKey，请先输入并保存' }, 400);
@@ -349,14 +350,10 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       }
     }
 
-    // 6. 打卡项目列表：查询云端项目且动态注入云开关状态 (只要存在任意一条启用状态即判定为全局开启，彻底实现后台开关联动)
+    // 6. 打卡项目列表：查询云端项目且动态注入云端微信全局通道开启状态
     if (path === '/projects/list' && method === 'GET') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse([]);
-
-      // 核心重构：实时获取云端 D1 数据库中是否存在任何一条处于开启状态（enabled = 1）的推送规则，有则认定为全局开启
-      const globalConfig = await db.prepare('SELECT id FROM notification_configs WHERE enabled = 1 LIMIT 1').first();
-      const isGlobalEnabled = !!globalConfig;
 
       const rows = await db.prepare('SELECT * FROM projects').all();
       const allProjects = (rows.results || []).map((row: any) => ({
@@ -370,12 +367,10 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
         createdAt: row.created_at,
       }));
 
+      // 筛选出当前用户是成员或创建者的项目
       const myProjects = allProjects.filter((p: any) =>
         p.members.includes(currentUser.id) || p.creatorId === currentUser.id
-      ).map((p: any) => ({
-        ...p,
-        globalReminderEnabled: isGlobalEnabled, // 动态注入 D1 数据库全局开关，实现全栈无缝联动
-      }));
+      );
 
       return jsonResponse(myProjects);
     }
@@ -544,7 +539,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       });
     }
 
-    // 10. 日历打卡日详情：获取指定打卡项目、日期的打卡流水和互动评论 (全新上线，解决 CheckInDrawer 崩溃根源)
+    // 10. 日历打卡日详情：获取指定打卡项目、日期的打卡流水和互动评论
     if (path === '/checkins/day-detail' && method === 'GET') {
       const projectId = url.searchParams.get('projectId');
       const date = url.searchParams.get('date');
@@ -708,7 +703,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse(rows.results || []);
     }
 
-    // 16. 每日互动留言列表：获取某项目某日期的留言列表 (与 schema.sql 的 comments 表完全同步)
+    // 16. 每日互动留言列表：获取某项目某日期的留言列表
     if (path === '/comments/list' && method === 'GET') {
       const projectId = url.searchParams.get('projectId');
       const date = url.searchParams.get('date');
@@ -768,7 +763,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       });
     }
 
-    // 18. 站内私信私聊：获取私聊历史记录 (对齐并从 messages 表拉取，解决私聊 404 错误)
+    // 18. 站内私信私聊：获取私聊历史记录
     if (path.startsWith('/messages/') && !path.endsWith('/send') && !path.endsWith('/read') && method === 'GET') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse({ error: '未登录' }, 401);
@@ -823,7 +818,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       });
     }
 
-    // 20. 站内私信私聊：标记消息为已读 (已读后红点才会消失)
+    // 20. 站内私信私聊：标记消息为已读
     if (path === '/messages/read' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse({ error: '未登录' }, 401);
@@ -1140,7 +1135,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       });
     }
 
-    // 32. 【管理后台云接口】：一键开关指定通知提醒配置
+    // 32. 【管理后台云接口】：一键开关指定通知提醒配置 (直接绑定 Integer、Boolean 或字符类型)
     if (path.startsWith('/admin/notifications/configs/') && path.endsWith('/toggle') && method === 'PATCH') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
@@ -1168,7 +1163,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true });
     }
 
-    // 34. 【微信督促引擎】：一键微信督促推送，遍历当天未打卡项目成员批量精准推送 (实现纯手写提醒内容的“所见即所得”纯文字微信推送)
+    // 34. 【微信督促引擎】：一键微信督促推送，遍历当天未打卡项目成员批量精准推送 (实现在真机上推送用户手打催促文本的“所见即所得”纯文字微信推送)
     if (path === '/admin/notifications/trigger-reminder' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
