@@ -136,7 +136,7 @@ export const ProfileView: React.FC = () => {
                 </span>
               </div>
               <p className="text-[11px] text-stone-500 mt-0.5">
-                绑定后每日未打卡或收到好友私聊时，将由微信服务号精准 1对1 推送
+                绑定后每日未打卡时，将由微信服务号推送提醒
               </p>
             </div>
           </div>
@@ -209,7 +209,7 @@ export const ProfileView: React.FC = () => {
               </div>
               <ol className="text-[11px] text-stone-500 mt-1 max-w-sm mx-auto text-left list-decimal list-inside space-y-1">
                 <li>
-                  微信扫码或打开{' '}
+                  点击屏幕二维码或打开{' '}
                   <a
                     href="https://sct.ftqq.com/"
                     target="_blank"
@@ -219,7 +219,7 @@ export const ProfileView: React.FC = () => {
                     sct.ftqq.com
                   </a>
                 </li>
-                <li>微信一键登录并关注服务号</li>
+                <li>点击右上角登陆使用微信扫码并关注服务号</li>
                 <li>复制网站上的 <b>SendKey</b> 粘贴到下方保存即可！</li>
               </ol>
             </div>
