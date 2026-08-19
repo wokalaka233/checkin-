@@ -150,7 +150,9 @@ export const CalendarView: React.FC = () => {
                     🔥 个人火花: {activeProject.currentUserSpark || activeProject.sparks?.[user?.id || ''] || 0} 天
                   </span>
                 )}
-                {(activeProject.reminderEnabled ?? activeProject.rules?.reminderEnabled) && (
+                
+                {/* 微信每日催促角标：加入 globalReminderEnabled 云端全局开关状态校验 */}
+                {activeProject.globalReminderEnabled !== false && (activeProject.reminderEnabled ?? activeProject.rules?.reminderEnabled) && (
                   <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-md">
                     ⏰ 微信每日催促 {activeProject.reminderTime || activeProject.rules?.reminderTime || '21:00'}
                   </span>
