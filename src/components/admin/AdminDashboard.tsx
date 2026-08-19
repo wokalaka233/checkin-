@@ -20,7 +20,7 @@ import {
   Play,
   Pause,
 } from 'lucide-react';
-import { AdminUserSummary, AdminUserDetail, CheckInRecord } from '../../types';
+import { AdminUserSummary, AdminUserDetail, CheckInRecord, HabitProject } from '../../types';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { AdminPasswordModal } from './AdminPasswordModal';
