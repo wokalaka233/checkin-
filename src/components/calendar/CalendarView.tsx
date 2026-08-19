@@ -202,9 +202,10 @@ export const CalendarView: React.FC = () => {
         )}
       </main>
 
-      {/* Project Creation Modal */}
+      {/* Project Creation Modal - 传入云端提醒全局开启标识，进行无痕显隐同步控制 */}
       <ProjectModal
         isOpen={isCreateModalOpen}
+        globalReminderEnabled={projects.length > 0 ? (projects[0].globalReminderEnabled !== false) : true}
         onClose={() => setIsCreateModalOpen(false)}
         onSuccess={(proj) => {
           fetchProjects(proj.id);
