@@ -24,6 +24,15 @@ export const CalendarView: React.FC = () => {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [selectedDateForDrawer, setSelectedDateForDrawer] = useState<string | null>(null);
 
+  // 新增：本地时区时间计算函数，取代 ISOString UTC 零时区，彻底根治清晨测试时将当天误判为昨天触发防作弊的缺陷
+  const getLocalTodayStr = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = today.getMonth() + 1;
+    const day = today.getDate();
+    return `${year}-${month < 10 ? '0' + month : month}-${day < 10 ? '0' + day : day}`;
+  };
+
   // Fetch projects (同步化决策更新，合并渲染，彻底解决“空白占位闪烁”问题)
   const fetchProjects = useCallback(async (selectId?: string) => {
     try {
@@ -107,13 +116,19 @@ export const CalendarView: React.FC = () => {
 
   return (
     <div className="w-full min-h-screen bg-stone-50/60 pb-24">
-      {/* Top Project Navigation Bar */}
+      {/* Top Project Navigation Bar - 引入唤醒拉取指令，打开弹窗前自动更新 D1 云端开关，彻底杜绝同步延迟 */}
       <ProjectCapsules
         projects={projects}
         activeProjectId={activeProjectId}
         onSelectProject={(id) => setActiveProjectId(id)}
-        onOpenCreateModal={() => setIsCreateModalOpen(true)}
-        onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
+        onOpenCreateModal={() => {
+          fetchProjects(); // 新建前自动向 D1 云端同步开关状态
+          setIsCreateModalOpen(true);
+        }}
+        onOpenSettingsModal={() => {
+          fetchProjects(); // 设置前自动向 D1 云端同步开关状态
+          setIsSettingsModalOpen(true);
+        }}
       />
 
       {/* Main Container */}
@@ -166,7 +181,10 @@ export const CalendarView: React.FC = () => {
             <button
               id="btn-quick-today-checkin"
               type="button"
-              onClick={() => setSelectedDateForDrawer(new Date().toISOString().slice(0, 10))}
+              onClick={() => {
+                fetchProjects(); // 点击打卡前自动更新 D1 状态
+                setSelectedDateForDrawer(getLocalTodayStr()); // 更正：换用本地时区安全的日期运算，解决清晨无法打卡 Bug
+              }}
               className="px-4 py-2 bg-stone-900 hover:bg-stone-800 active:scale-95 text-white text-xs font-semibold rounded-xl transition-all shadow-xs"
             >
               今日打卡
@@ -182,7 +200,10 @@ export const CalendarView: React.FC = () => {
             onNextMonth={handleNextMonth}
             onToday={handleToday}
             daysData={daysData}
-            onSelectDate={(dateStr) => setSelectedDateForDrawer(dateStr)}
+            onSelectDate={(dateStr) => {
+              fetchProjects(); // 点击日期前自动向 D1 同步最新开关状态
+              setSelectedDateForDrawer(dateStr);
+            }}
           />
         ) : loadingProjects ? (
           <div className="bg-white rounded-2xl border border-stone-200 p-12 text-center shadow-xs">
@@ -193,7 +214,10 @@ export const CalendarView: React.FC = () => {
             <p className="text-sm text-stone-600">您当前还没有任何打卡项目</p>
             <button
               type="button"
-              onClick={() => setIsCreateModalOpen(true)}
+              onClick={() => {
+                fetchProjects(); // 创建前自动同步 D1 状态
+                setIsCreateModalOpen(true);
+              }}
               className="px-4 py-2 bg-stone-900 text-white text-xs font-semibold rounded-xl hover:bg-stone-800 transition-colors"
             >
               立即创建打卡项目
