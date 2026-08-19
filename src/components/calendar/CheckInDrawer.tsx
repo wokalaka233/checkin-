@@ -142,7 +142,7 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
     reader.readAsDataURL(file);
   };
 
-  // Handle Check-in submit (加入可选链及两端防御锁，解决 Cannot read properties of undefined 报错)
+  // Handle Check-in submit (加入可选链及安全防护，彻底解决 Cannot read properties of undefined 报错)
   const handleSubmitCheckIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError('');
@@ -159,7 +159,6 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
         text: text.trim(),
       });
 
-      // 增加两端接口对齐安全校验防御
       if (res && res.record && res.record.isQualified) {
         setSubmitSuccess('恭喜打卡达标！火花已更新 🔥');
       } else {
@@ -496,7 +495,9 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
                       备注：{rules.note}
                     </div>
                   )}
-                  {(rules.reminderEnabled ?? project.reminderEnabled) && (
+                  
+                  {/* 微信每日督促显示：加入 D1 数据库全局 enabled 开关强同步联动 */}
+                  {project.globalReminderEnabled !== false && (rules.reminderEnabled ?? project.reminderEnabled) && (
                     <div className="text-emerald-700 font-medium text-[11px] pt-1 flex items-center gap-1 border-t border-stone-100">
                       <span>⏰ 微信每日催促已开启 ({rules.reminderTime || project.reminderTime || '21:00'})</span>
                     </div>
