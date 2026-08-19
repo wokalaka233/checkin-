@@ -37,9 +37,27 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
 
   const startRecording = async () => {
     setErrorMessage('');
+    
+    // 兼容性环境核验：如果当前浏览器缺少 getUserMedia 标准接口，抛出友好指引并阻断卡死
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setErrorMessage('提示：当前浏览器或环境不支持网页录音，请确保使用原生的 Safari 浏览器（iOS）或 Chrome 浏览器打开网站，且确保在 https:// 加密地址下访问。');
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      
+      // 动态编码核验：自动探测当前浏览器最偏爱的音频格式（苹果走 mp4，安卓和 Chrome 走 webm），防范苹果手机直接报错卡死
+      let options = {};
+      if (typeof MediaRecorder !== 'undefined') {
+        if (MediaRecorder.isTypeSupported('audio/mp4')) {
+          options = { mimeType: 'audio/mp4' };
+        } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+          options = { mimeType: 'audio/webm' };
+        }
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, options);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
@@ -50,7 +68,9 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       };
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // 动态 Blob 生成：自动根据当前实际的录制编码生成 Blob，拒绝强制套 WebM 导致苹果设备无法回放或上传
+        const recordedType = mediaRecorderRef.current?.mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: recordedType });
         const reader = new FileReader();
         reader.readAsDataURL(audioBlob);
         reader.onloadend = () => {
@@ -73,7 +93,7 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       }, 500);
     } catch (err: any) {
       console.error('Error starting recording:', err);
-      setErrorMessage('无法访问麦克风，请检查浏览器权限');
+      setErrorMessage('无法访问麦克风，请检查手机系统设置及浏览器权限');
     }
   };
 
@@ -126,12 +146,14 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
       }`}
     >
       {errorMessage && (
-        <div className="text-xs text-red-600 mb-2">{errorMessage}</div>
+        <div className="text-xs text-amber-600 bg-amber-50 border border-amber-200 p-2.5 rounded-xl mb-2 font-medium leading-relaxed">
+          {errorMessage}
+        </div>
       )}
 
       {!isRecording && !recordedAudio && (
         <div className="flex items-center justify-between">
-          <div className="text-xs text-stone-600 flex items-center gap-1.5">
+          <div className="text-xs text-stone-600 flex items-center gap-1.5 flex-shrink-0 mr-2">
             <Mic className="w-4 h-4 text-stone-700" />
             <span>点击开始录制语音</span>
           </div>
@@ -139,7 +161,7 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
             id="btn-start-record"
             type="button"
             onClick={startRecording}
-            className="px-3.5 py-1.5 bg-stone-900 hover:bg-stone-800 active:scale-95 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all shadow-xs"
+            className="px-3.5 py-1.5 bg-stone-900 hover:bg-stone-800 active:scale-95 text-white text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all shadow-xs ml-auto"
           >
             <Mic className="w-3.5 h-3.5" />
             开始录音
