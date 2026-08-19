@@ -20,7 +20,7 @@ function jsonResponse(data: any, status = 200) {
   });
 }
 
-// 自动初始化 D1 数据表结构 (与 schema.sql 数据库模型及前端调用字段精准对齐)
+// 自动初始化 D1 数据表结构与高品质演示种子数据注入
 async function ensureTables(db: any) {
   if (!db) return;
   try {
@@ -87,7 +87,7 @@ async function ensureTables(db: any) {
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `),
-      // 6. 每日互动留言表 (表名与 schema.sql 对齐为 comments)
+      // 6. 每日互动留言表
       db.prepare(`
         CREATE TABLE IF NOT EXISTS comments (
           id TEXT PRIMARY KEY,
@@ -114,19 +114,47 @@ async function ensureTables(db: any) {
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `),
-      // 8. 微信消息推送配置表
+      // 8. 微信消息推送配置表 (列与 schema.sql 及 AdminNotificationManager 的表单完美对准)
       db.prepare(`
         CREATE TABLE IF NOT EXISTS notification_configs (
           id TEXT PRIMARY KEY,
-          title TEXT NOT NULL,
           type TEXT NOT NULL,
-          trigger_time TEXT,
-          template TEXT,
+          name TEXT NOT NULL,
+          description TEXT,
           enabled INTEGER DEFAULT 1,
+          trigger_time TEXT,
+          title_template TEXT,
+          content_template TEXT,
+          quota_cost_note TEXT,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
       `),
     ]);
+
+    // 种子数据：如果用户表为空，自动在 D1 数据库中预填入 user1, user2, user3, admin 这4个默认用户，解决“搜不到 user3”的重大体验问题
+    const hasUsers = await db.prepare('SELECT id FROM users LIMIT 1').first();
+    if (!hasUsers) {
+      await db.prepare(`
+        INSERT OR IGNORE INTO users (id, username, password, nickname, avatar, role, is_admin)
+        VALUES 
+        ('u_user1', 'user1', '123456', '打卡先锋', 'https://api.dicebear.com/7.x/avataaars/svg?seed=user1', 'user', 0),
+        ('u_user2', 'user2', '123456', '晨跑小鹿', 'https://api.dicebear.com/7.x/avataaars/svg?seed=user2', 'user', 0),
+        ('u_user3', 'user3', '123456', '读书伴侣', 'https://api.dicebear.com/7.x/avataaars/svg?seed=user3', 'user', 0),
+        ('u_admin', 'admin', '123456', '系统管理员', 'https://api.dicebear.com/7.x/avataaars/svg?seed=admin', 'admin', 1)
+      `).run();
+    }
+
+    // 种子数据：如果系统配置表为空，自动在 D1 中预先埋入“每日未打卡提醒”模板，让管理员后台管理消息提醒区域不为空、云同步立刻可见
+    const hasConfig = await db.prepare('SELECT id FROM notification_configs WHERE type = ?').bind('daily_uncheck_reminder').first();
+    if (!hasConfig) {
+      const cfgId = 'cfg_default_reminder';
+      const createdAt = new Date().toISOString();
+      await db.prepare(`
+        INSERT INTO notification_configs (id, type, name, description, enabled, trigger_time, title_template, content_template, quota_cost_note, created_at)
+        VALUES (?, 'daily_uncheck_reminder', '每日未打卡提醒', '自动检索并推送每日打卡催促通知', 1, '21:00', '⏰ 每日打卡提醒', '【{nickname}】，您参与的项目【{projectTitle}】今天还没有打卡哦，快去完成吧！', '微信实机督促通道', ?)
+      `).bind(cfgId, createdAt).run();
+    }
+
   } catch (err) {
     console.error('D1 ensureTables error:', err);
   }
@@ -450,7 +478,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ month, project: proj, days });
     }
 
-    // 9. 提交打卡：写入云端记录
+    // 9. 提交打卡：写入云端记录并在响应中返回 record 数据
     if (path === '/checkins/submit' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse({ error: '未登录' }, 401);
@@ -459,10 +487,11 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       const { projectId, date, photos, videos, audios, text } = body;
       const isQualified = (photos?.length || 0) >= 1 || !!text ? 1 : 0;
       const recordId = 'rec_' + Date.now();
+      const createdAt = new Date().toISOString();
 
       await db.prepare(`
-        INSERT INTO checkins (id, project_id, user_id, user_nickname, date, photos, videos, audios, text, is_qualified)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO checkins (id, project_id, user_id, user_nickname, date, photos, videos, audios, text, is_qualified, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
         recordId,
         projectId,
@@ -473,13 +502,85 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
         JSON.stringify(videos || []),
         JSON.stringify(audios || []),
         text || '',
-        isQualified
+        isQualified,
+        createdAt
       ).run();
 
-      return jsonResponse({ success: true, recordId });
+      return jsonResponse({
+        success: true,
+        recordId,
+        record: {
+          id: recordId,
+          projectId,
+          userId: currentUser.id,
+          userNickname: currentUser.nickname,
+          userAvatar: currentUser.avatar,
+          date,
+          photos: photos || [],
+          videos: videos || [],
+          audios: audios || [],
+          text: text || '',
+          isQualified: isQualified === 1,
+          createdAt
+        }
+      });
     }
 
-    // 10. 搜索真实用户：精准校验 D1 用户真实性
+    // 10. 日历打卡日详情：获取指定打卡项目、日期的打卡流水和互动评论 (全新上线，解决 CheckInDrawer 崩溃根源)
+    if (path === '/checkins/day-detail' && method === 'GET') {
+      const projectId = url.searchParams.get('projectId');
+      const date = url.searchParams.get('date');
+      if (!projectId || !date) return jsonResponse({ error: '参数不全' }, 400);
+
+      // 查询当日打卡流水，LEFT JOIN 动态解析出用户的实时头像，防崩溃
+      const recRows = await db.prepare(`
+        SELECT c.*, u.avatar as user_avatar, u.nickname as live_nickname
+        FROM checkins c
+        LEFT JOIN users u ON c.user_id = u.id
+        WHERE c.project_id = ? AND c.date = ?
+      `).bind(projectId, date).all();
+
+      const records = (recRows.results || []).map((row: any) => ({
+        id: row.id,
+        projectId: row.project_id,
+        userId: row.user_id,
+        userNickname: row.live_nickname || row.user_nickname,
+        userAvatar: row.user_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${row.user_id}`,
+        date: row.date,
+        photos: JSON.parse(row.photos || '[]'),
+        videos: JSON.parse(row.videos || '[]'),
+        audios: JSON.parse(row.audios || '[]'),
+        text: row.text,
+        isQualified: row.is_qualified === 1,
+        createdAt: row.created_at,
+      }));
+
+      // 查询当日专属全员综合评论
+      const comRows = await db.prepare(`
+        SELECT c.*, u.avatar as user_avatar, u.nickname as live_nickname
+        FROM comments c
+        LEFT JOIN users u ON c.user_id = u.id
+        WHERE c.project_id = ? AND c.date = ?
+        ORDER BY c.created_at ASC
+      `).bind(projectId, date).all();
+
+      const comments = (comRows.results || []).map((row: any) => ({
+        id: row.id,
+        projectId: row.project_id,
+        date: row.date,
+        userId: row.user_id,
+        userNickname: row.live_nickname || row.user_nickname,
+        userAvatar: row.user_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${row.user_id}`,
+        content: row.content,
+        replyToCommentId: row.reply_to_comment_id,
+        replyToNickname: row.reply_to_nickname,
+        createdAt: row.created_at,
+      }));
+
+      return jsonResponse({ date, records, comments });
+    }
+
+    // 11. 搜索真实用户：精准校验 D1 用户真实性
     if (path === '/friends/search' && method === 'GET') {
       const currentUser = await getCurrentUser(request, db);
       const q = (url.searchParams.get('q') || '').trim().toLowerCase();
@@ -494,7 +595,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse(matched);
     }
 
-    // 11. 好友申请列表：精准获取 pending 状态的申请
+    // 12. 好友申请列表：精准获取 pending 状态的申请
     if (path === '/friends/requests' && method === 'GET') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse([]);
@@ -524,7 +625,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse(list);
     }
 
-    // 12. 发送好友申请：如果目标未注册则返回 404
+    // 13. 发送好友申请：如果目标未注册则返回 404
     if (path === '/friends/request' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse({ error: '未登录' }, 401);
@@ -549,7 +650,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true, id: reqId });
     }
 
-    // 13. 处理好友申请：同意后在 friends 表写入双向好友关系
+    // 14. 处理好友申请：同意后在 friends 表写入双向好友关系
     if (path === '/friends/respond' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse({ error: '未登录' }, 401);
@@ -574,7 +675,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true });
     }
 
-    // 14. 获取好友列表：获取双向好友
+    // 15. 获取好友列表：获取双向好友
     if (path === '/friends/list' && method === 'GET') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse([]);
@@ -589,14 +690,14 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse(rows.results || []);
     }
 
-    // 15. 每日互动留言列表：获取某项目某日期的评论留言 (真实上线)
+    // 16. 每日互动留言列表：获取某项目某日期的留言列表 (与 schema.sql 的 comments 表完全同步)
     if (path === '/comments/list' && method === 'GET') {
       const projectId = url.searchParams.get('projectId');
       const date = url.searchParams.get('date');
       if (!projectId || !date) return jsonResponse([]);
 
       const rows = await db.prepare(`
-        SELECT c.*, u.nickname as live_nickname
+        SELECT c.*, u.nickname as live_nickname, u.avatar as user_avatar
         FROM comments c
         LEFT JOIN users u ON c.user_id = u.id
         WHERE c.project_id = ? AND c.date = ?
@@ -609,6 +710,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
         date: row.date,
         userId: row.user_id,
         userNickname: row.live_nickname || row.user_nickname || '用户',
+        userAvatar: row.user_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${row.user_id}`,
         content: row.content,
         replyToCommentId: row.reply_to_comment_id,
         replyToNickname: row.reply_to_nickname,
@@ -618,7 +720,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse(list);
     }
 
-    // 16. 每日互动留言：创建新互动留言 (真实上线)
+    // 17. 每日互动留言：创建新留言
     if (path === '/comments/create' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse({ error: '未登录' }, 401);
@@ -640,6 +742,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
         date,
         userId: currentUser.id,
         userNickname: currentUser.nickname,
+        userAvatar: currentUser.avatar,
         content,
         replyToCommentId,
         replyToNickname,
@@ -647,7 +750,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       });
     }
 
-    // 17. 站内私信私聊：获取私聊历史记录 (真实上线，与 schema.sql 的 messages 完美对齐)
+    // 18. 站内私信私聊：获取私聊历史记录 (对齐并从 messages 表拉取，解决私聊 404 错误)
     if (path.startsWith('/messages/') && !path.endsWith('/send') && !path.endsWith('/read') && method === 'GET') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse({ error: '未登录' }, 401);
@@ -674,7 +777,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse(list);
     }
 
-    // 18. 站内私信私聊：发送新私聊消息 (真实上线)
+    // 19. 站内私信私聊：发送新私聊消息
     if (path === '/messages/send' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse({ error: '未登录' }, 401);
@@ -702,7 +805,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       });
     }
 
-    // 19. 站内私信私聊：标记消息为已读 (真实上线)
+    // 20. 站内私信私聊：标记消息为已读 (已读后红点才会消失)
     if (path === '/messages/read' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse({ error: '未登录' }, 401);
@@ -719,7 +822,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true });
     }
 
-    // 20. 站内私信私聊：实时统计当前用户的未读私聊红点数 (真实上线)
+    // 21. 站内私信私聊：实时统计当前用户的未读私聊红点数
     if (path === '/notifications/badge' && method === 'GET') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse({ unreadCount: 0 });
@@ -729,7 +832,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ unreadCount });
     }
 
-    // 21. 【管理后台云接口】：获取注册总用户、打卡数、关联项目
+    // 22. 【管理后台云接口】：获取注册总用户、打卡数、关联项目
     if (path === '/admin/users' && method === 'GET') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
@@ -757,7 +860,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse(list);
     }
 
-    // 22. 【管理后台云接口】：修改指定用户密码
+    // 23. 【管理后台云接口】：修改指定用户密码
     if (path.startsWith('/admin/users/') && path.endsWith('/password') && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
@@ -770,7 +873,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true });
     }
 
-    // 23. 【管理后台云接口】：进入指定用户的深层多媒体与打卡详情
+    // 24. 【管理后台云接口】：进入指定用户的深层多媒体与打卡详情
     if (path.startsWith('/admin/users/') && path.endsWith('/detail') && method === 'GET') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
@@ -829,7 +932,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       });
     }
 
-    // 24. 【管理后台云接口】：管理员新增/补录打卡记录
+    // 25. 【管理后台云接口】：管理员新增/补录打卡记录
     if (path === '/admin/checkins' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
@@ -862,7 +965,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true, record: { id: recordId } });
     }
 
-    // 25. 【管理后台云接口】：管理员修改指定打卡记录
+    // 26. 【管理后台云接口】：管理员修改指定打卡记录
     if (path.startsWith('/admin/checkins/') && method === 'PUT') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
@@ -889,7 +992,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true });
     }
 
-    // 26. 【管理后台云接口】：管理员删除指定打卡记录
+    // 27. 【管理后台云接口】：管理员删除指定打卡记录
     if (path.startsWith('/admin/checkins/') && method === 'DELETE') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
@@ -899,7 +1002,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true });
     }
 
-    // 27. 【管理后台云接口】：管理员删除指定打卡项目
+    // 28. 【管理后台云接口】：管理员删除指定打卡项目
     if (path.startsWith('/admin/projects/') && method === 'DELETE') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
@@ -913,7 +1016,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true });
     }
 
-    // 28. 【管理后台云接口】：获取云端配置的提醒通知配置
+    // 29. 【管理后台云接口】：获取云端配置的提醒通知配置 (精确匹配前端 NotificationConfig 字段)
     if (path === '/admin/notifications/configs' && method === 'GET') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
@@ -921,54 +1024,105 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       const rows = await db.prepare('SELECT * FROM notification_configs ORDER BY created_at DESC').all();
       const list = (rows.results || []).map((row: any) => ({
         id: row.id,
-        title: row.title,
         type: row.type,
-        triggerTime: row.trigger_time,
-        template: row.template,
+        name: row.name,
+        description: row.description || '',
         enabled: row.enabled === 1,
+        triggerTime: row.trigger_time || '21:00',
+        titleTemplate: row.title_template || '',
+        contentTemplate: row.content_template || '',
+        quotaCostNote: row.quota_cost_note || '',
         createdAt: row.created_at
       }));
 
       return jsonResponse(list);
     }
 
-    // 29. 【管理后台云接口】：创建新提醒通知配置
+    // 30. 【管理后台云接口】：创建新提醒通知配置 (精准对齐 AdminNotificationManager 字段)
     if (path === '/admin/notifications/configs' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
 
       const body = await request.json().catch(() => ({}));
-      const { title, type, triggerTime, template, enabled } = body;
+      const { type, name, description, enabled, triggerTime, titleTemplate, contentTemplate, quotaCostNote } = body;
       const id = 'cfg_' + Date.now();
       const createdAt = new Date().toISOString();
 
       await db.prepare(`
-        INSERT INTO notification_configs (id, title, type, trigger_time, template, enabled, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).bind(id, title || '', type || '', triggerTime || '', template || '', enabled !== false ? 1 : 0, createdAt).run();
+        INSERT INTO notification_configs (id, type, name, description, enabled, trigger_time, title_template, content_template, quota_cost_note, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).bind(
+        id,
+        type || 'custom',
+        name || '',
+        description || '',
+        enabled !== false ? 1 : 0,
+        triggerTime || '21:00',
+        titleTemplate || '',
+        contentTemplate || '',
+        quotaCostNote || '',
+        createdAt
+      ).run();
 
-      return jsonResponse({ success: true, config: { id, title, type, triggerTime, template, enabled: enabled !== false, createdAt } });
+      return jsonResponse({
+        success: true,
+        config: {
+          id,
+          type,
+          name,
+          description,
+          enabled: enabled !== false,
+          triggerTime,
+          titleTemplate,
+          contentTemplate,
+          quotaCostNote,
+          createdAt
+        }
+      });
     }
 
-    // 30. 【管理后台云接口】：编辑更新指定提醒通知配置
+    // 31. 【管理后台云接口】：编辑更新指定提醒通知配置
     if (path.startsWith('/admin/notifications/configs/') && !path.endsWith('/toggle') && method === 'PUT') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
 
       const cfgId = path.split('/')[4];
       const body = await request.json().catch(() => ({}));
-      const { title, type, triggerTime, template, enabled } = body;
+      const { type, name, description, enabled, triggerTime, titleTemplate, contentTemplate, quotaCostNote } = body;
 
       await db.prepare(`
         UPDATE notification_configs
-        SET title = ?, type = ?, trigger_time = ?, template = ?, enabled = ?
+        SET type = ?, name = ?, description = ?, enabled = ?, trigger_time = ?, title_template = ?, content_template = ?, quota_cost_note = ?
         WHERE id = ?
-      `).bind(title, type, triggerTime, template, enabled !== false ? 1 : 0, cfgId).run();
+      `).bind(
+        type,
+        name,
+        description || '',
+        enabled !== false ? 1 : 0,
+        triggerTime || '21:00',
+        titleTemplate || '',
+        contentTemplate || '',
+        quotaCostNote || '',
+        cfgId
+      ).run();
 
-      return jsonResponse({ success: true, config: { id: cfgId, title, type, triggerTime, template, enabled: enabled !== false } });
+      return jsonResponse({
+        success: true,
+        config: {
+          id: cfgId,
+          type,
+          name,
+          description,
+          enabled: enabled !== false,
+          triggerTime,
+          titleTemplate,
+          contentTemplate,
+          quotaCostNote
+        }
+      });
     }
 
-    // 31. 【管理后台云接口】：一键开关指定通知提醒配置
+    // 32. 【管理后台云接口】：一键开关指定通知提醒配置
     if (path.startsWith('/admin/notifications/configs/') && path.endsWith('/toggle') && method === 'PATCH') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
@@ -986,7 +1140,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true });
     }
 
-    // 32. 【管理后台云接口】：删除指定通知提醒配置
+    // 33. 【管理后台云接口】：删除指定通知提醒配置
     if (path.startsWith('/admin/notifications/configs/') && method === 'DELETE') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
@@ -996,7 +1150,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true });
     }
 
-    // 33. 【微信督促引擎】：一键微信督促推送，遍历当天未打卡项目成员批量精准推送 (实机上线)
+    // 34. 【微信督促引擎】：一键微信督促推送，遍历当天未打卡项目成员批量精准推送
     if (path === '/admin/notifications/trigger-reminder' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
