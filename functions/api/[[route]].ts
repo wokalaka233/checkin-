@@ -332,7 +332,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
         return jsonResponse({ error: '未检测到绑定的 SendKey，请先输入并保存' }, 400);
       }
 
-      const titleMsg = '打卡契约系统测试推送';
+      const titleMsg = '打卡系统测试推送';
       const despMsg = `亲爱的 ${currentUser.nickname}，这是一条来自您打卡系统后台的实机微信推送测试！恭喜您微信绑定配置成功！`;
       const serverChanUrl = `https://sctapi.ftqq.com/${actualKey}.send?title=${encodeURIComponent(titleMsg)}&desp=${encodeURIComponent(despMsg)}`;
 
