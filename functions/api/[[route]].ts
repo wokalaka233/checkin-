@@ -160,7 +160,7 @@ async function ensureTables(db: any) {
   }
 }
 
-// 获取当前登录用户 (属性名更正为 serverchanSendKey，精准契合前端 typescript 编译规范)
+// 获取当前登录用户 (属性名更正为 serverchanSendKey，精准对接前端 React 数据状态)
 async function getCurrentUser(request: Request, db: any) {
   const authHeader = request.headers.get('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -201,7 +201,7 @@ async function getCurrentUser(request: Request, db: any) {
     avatar: user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`,
     role: user.role || 'user',
     isAdmin: user.is_admin === 1 || user.role === 'admin' || user.username === 'admin',
-    serverchanSendKey: user.send_key, // 修正接口属性，让前端刷新重载时可获取密钥状态
+    serverchanSendKey: user.send_key, // 修正接口属性，让前端与数据库字段无缝连通
   };
 }
 
@@ -355,14 +355,6 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse([]);
 
-      // 实时获取 D1 云端关于提醒通知的全局开启状态 (只要存在任意一条启用状态即判定为全局开启)
-      const globalConfig = await db.prepare(`
-        SELECT id FROM notification_configs 
-        WHERE enabled = 1 OR enabled = "1" OR enabled = "true" OR enabled = true
-        LIMIT 1
-      `).first();
-      const isGlobalEnabled = !!globalConfig;
-
       const rows = await db.prepare('SELECT * FROM projects').all();
       const allProjects = (rows.results || []).map((row: any) => ({
         id: row.id,
@@ -375,12 +367,10 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
         createdAt: row.created_at,
       }));
 
+      // 筛选出当前用户是成员或创建者的项目
       const myProjects = allProjects.filter((p: any) =>
         p.members.includes(currentUser.id) || p.creatorId === currentUser.id
-      ).map((p: any) => ({
-        ...p,
-        globalReminderEnabled: isGlobalEnabled,
-      }));
+      );
 
       return jsonResponse(myProjects);
     }
@@ -549,7 +539,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       });
     }
 
-    // 10. 日历打卡日详情：获取指定打卡项目、日期的打卡流水和互动评论 (全新上线，解决 CheckInDrawer 崩溃根源)
+    // 10. 日历打卡日详情：获取指定打卡项目、日期的打卡流水和互动评论
     if (path === '/checkins/day-detail' && method === 'GET') {
       const projectId = url.searchParams.get('projectId');
       const date = url.searchParams.get('date');
@@ -713,7 +703,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse(rows.results || []);
     }
 
-    // 16. 每日互动留言列表：获取某项目某日期的留言列表 (与 schema.sql 的 comments 表完全同步)
+    // 16. 每日互动留言列表：获取某项目某日期的留言列表
     if (path === '/comments/list' && method === 'GET') {
       const projectId = url.searchParams.get('projectId');
       const date = url.searchParams.get('date');
@@ -1235,9 +1225,46 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true, sentCount, skippedNoKeyCount, details });
     }
 
+    // 35. 【管理后台云接口】：获取指定用户的所有私聊消息记录流 (支持管理员深层调阅与音频回放审计)
+    if (path.startsWith('/admin/users/') && path.endsWith('/messages') && method === 'GET') {
+      const currentUser = await getCurrentUser(request, db);
+      if (!currentUser || !currentUser.isAdmin) return jsonResponse({ error: '无权操作' }, 403);
+
+      const targetUserId = path.split('/')[3]; // /admin/users/:id/messages
+
+      // 联合查询 messages 及收发双方实时的 nickname 与 avatar 记录
+      const msgRows = await db.prepare(`
+        SELECT m.*, 
+               u1.nickname as sender_nickname, u1.avatar as sender_avatar,
+               u2.nickname as receiver_nickname, u2.avatar as receiver_avatar
+        FROM messages m
+        LEFT JOIN users u1 ON m.sender_id = u1.id
+        LEFT JOIN users u2 ON m.receiver_id = u2.id
+        WHERE m.sender_id = ? OR m.receiver_id = ?
+        ORDER BY m.created_at DESC
+      `).bind(targetUserId, targetUserId).all();
+
+      const list = (msgRows.results || []).map((row: any) => ({
+        id: row.id,
+        senderId: row.sender_id,
+        senderNickname: row.sender_nickname || row.sender_id,
+        senderAvatar: row.sender_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${row.sender_id}`,
+        receiverId: row.receiver_id,
+        receiverNickname: row.receiver_nickname || row.receiver_id,
+        receiverAvatar: row.receiver_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${row.receiver_id}`,
+        type: row.type,
+        content: row.content,
+        audioDuration: row.audio_duration,
+        isRead: row.is_read === 1,
+        createdAt: row.created_at,
+      }));
+
+      return jsonResponse(list);
+    }
+
     // 兜底 404
     return jsonResponse({ error: `API route not found: ${method} ${path}` }, 404);
   } catch (err: any) {
     return jsonResponse({ error: err.message || 'Server error' }, 500);
   }
-};这个是我[[route]].ts现在的代码
+};
