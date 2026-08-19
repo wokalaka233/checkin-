@@ -42,6 +42,9 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
   const fetchMessages = async () => {
     if (!friend) return;
     try {
+      // 核心修正：加载私聊前先触发已读状态云端 D1 上报，精准清除未读红点 count
+      await api.markMessagesRead(friend.id);
+      
       const list = await api.getMessages(friend.id);
       setMessages(list);
       await refreshBadge();
