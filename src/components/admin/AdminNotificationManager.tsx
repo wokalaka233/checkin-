@@ -22,6 +22,8 @@ export const AdminNotificationManager: React.FC<AdminNotificationManagerProps> =
   // Edit / Create Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [editingConfig, setEditingConfig] = useState<NotificationConfig | null>(null);
+  
+  // 核心改动 1：对准 schema.sql 数据库中真实列名
   const [formData, setFormData] = useState({
     type: 'daily_uncheck_reminder',
     name: '',
@@ -58,8 +60,8 @@ export const AdminNotificationManager: React.FC<AdminNotificationManagerProps> =
       enabled: true,
       triggerTime: '21:00',
       titleTemplate: '⏰ 打卡提醒通知',
-      contentTemplate: '【{nickname}】，您参与的项目【{projectTitle}】今天还没有打卡哦，快去完成吧！',
-      quotaCostNote: '',
+      contentTemplate: '亲爱的成员，您参与的项目今天还没有打卡哦，快去完成吧！',
+      quotaCostNote: '微信实机通道',
     });
     setModalOpen(true);
   };
@@ -126,7 +128,7 @@ export const AdminNotificationManager: React.FC<AdminNotificationManagerProps> =
 
   return (
     <div className="space-y-4">
-      {/* Top Action: Only the green button */}
+      {/* Top Action */}
       <div className="flex justify-end">
         <button
           id="btn-admin-add-notification"
@@ -186,6 +188,11 @@ export const AdminNotificationManager: React.FC<AdminNotificationManagerProps> =
                   {cfg.description && (
                     <p className="text-xs text-stone-400 mt-0.5">{cfg.description}</p>
                   )}
+                  {cfg.triggerTime && (
+                    <p className="text-[10px] text-emerald-700 font-mono font-medium mt-1">
+                      ⏰ 触发时间: {cfg.triggerTime}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -241,7 +248,7 @@ export const AdminNotificationManager: React.FC<AdminNotificationManagerProps> =
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}
-                className="text-stone-400 hover:text-stone-600 text-xs font-bold px-2 py-1 rounded-lg"
+                className="text-stone-400 hover:text-stone-600 text-xs font-bold px-2 py-1"
               >
                 ✕
               </button>
@@ -255,7 +262,7 @@ export const AdminNotificationManager: React.FC<AdminNotificationManagerProps> =
                   required
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="例如：每日未打卡提醒"
+                  placeholder="例如：加好友提醒 / 收到打卡邀请"
                   className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:bg-white"
                 />
               </div>
@@ -266,8 +273,40 @@ export const AdminNotificationManager: React.FC<AdminNotificationManagerProps> =
                   type="text"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="例如：允许项目创建者设置每日微信催促"
-                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900 focus:bg-white"
+                  placeholder="例如：用于提醒打卡入队邀请或系统日志"
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-900"
+                />
+              </div>
+
+              <div>
+                <label className="block text-stone-700 font-bold mb-1">提醒推送时间</label>
+                <input
+                  type="time"
+                  value={formData.triggerTime}
+                  onChange={(e) => setFormData({ ...formData, triggerTime: e.target.value })}
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-stone-900 focus:outline-none focus:ring-2"
+                />
+              </div>
+
+              <div>
+                <label className="block text-stone-700 font-bold mb-1">通知卡片标题</label>
+                <input
+                  type="text"
+                  required
+                  value={formData.titleTemplate}
+                  onChange={(e) => setFormData({ ...formData, titleTemplate: e.target.value })}
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-stone-900 focus:outline-none focus:ring-2"
+                />
+              </div>
+
+              <div>
+                <label className="block text-stone-700 font-bold mb-1">通知内容默认文案</label>
+                <textarea
+                  rows={2}
+                  required
+                  value={formData.contentTemplate}
+                  onChange={(e) => setFormData({ ...formData, contentTemplate: e.target.value })}
+                  className="w-full px-3 py-2 bg-stone-50 border border-stone-200 rounded-xl text-stone-900 focus:outline-none focus:ring-2 resize-none"
                 />
               </div>
 
