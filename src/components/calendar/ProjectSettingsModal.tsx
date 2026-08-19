@@ -342,7 +342,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
                         </span>
                       </div>
 
-                      {/* 微信自定义催促文本 - 所见即所得设计 */}
+                      {/* 微信自定义催促文案输入框 - 实现纯文字所见即所得设计且移除了微信催促文本框下方的多余提示句 */}
                       <div>
                         <label className="block text-[11px] font-bold text-stone-700 mb-1">
                           微信自定义催促文案
@@ -355,9 +355,6 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
                           placeholder="今天不要忘记打卡哦，快去完成吧！"
                           className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-stone-900 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600 resize-none disabled:opacity-50"
                         />
-                        <p className="text-[10px] text-stone-500 mt-0.5 leading-relaxed">
-                          在文本框中输入什么字，系统推送时就会微信一字不差地精准发送给成员。
-                        </p>
                       </div>
                     </div>
                   )}
