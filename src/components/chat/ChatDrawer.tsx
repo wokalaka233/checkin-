@@ -41,7 +41,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
 
   // 核心改动 1：智能 HD 高清无损压缩算法，肉眼完美保真，体积骤降 90%，防止大图撑爆 D1 锁表
   const compressImage = (base64Str: string): Promise<string> => {
-    return new Promise((resolve) => {
+    return new Promise<string>((resolve) => {
       const img = new Image();
       img.src = base64Str;
       img.onload = () => {
