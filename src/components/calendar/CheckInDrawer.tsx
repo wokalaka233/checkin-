@@ -64,7 +64,7 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
 
   // 核心改动 1：智能 HD 高清无损压缩算法，肉眼完美保真，体积骤降 90%，防止大图撑爆 D1 锁表
   const compressImage = (base64Str: string): Promise<string> => {
-    return new Promise((resolve) => {
+    return new Promise<string>((resolve) => {
       const img = new Image();
       img.src = base64Str;
       img.onload = () => {
@@ -149,7 +149,7 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
   const meetsTextRule = !rules.requireText || text.trim().length > 0;
   const isFormQualified = meetsPhotoRule && meetsVideoRule && meetsAudioRule && meetsTextRule;
 
-  // 核心改动 2：当日打卡 24点截止防作弊拦截判定
+  // 客户端当日打卡截止与防作弊拦截判定 (本地时间 24:00 截止，管理员具有最高权限不受限制)
   const today = new Date();
   const year = today.getFullYear();
   const month = today.getMonth() + 1;
@@ -340,7 +340,7 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
                               className="w-8 h-8 rounded-full object-cover"
                             />
                             <div>
-                              <div className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
+                              <div className="text-xs font-bold text-stone-900 flex items-center gap-1">
                                 <span>{rec.userNickname}</span>
                                 {rec.userId === user?.id && (
                                   <span className="text-[10px] px-1 bg-stone-200 text-stone-700 rounded font-normal">
