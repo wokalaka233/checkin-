@@ -705,14 +705,14 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
                     <div>
                       <label className="block text-xs font-semibold text-stone-700 mb-1.5 flex items-center gap-1">
                         <FileText className="w-3.5 h-3.5" />
-                        <span>打卡文字说明 / 心得</span>
+                        <span>打卡文字说明</span>
                       </label>
                       <textarea
                         id="input-checkin-text"
                         rows={2}
                         value={text}
                         onChange={(e) => setText(e.target.value)}
-                        placeholder="写下今天的打卡体会..."
+                        placeholder="写点什么..."
                         className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-stone-900 text-xs focus:outline-none focus:ring-2 focus:ring-stone-900"
                       />
                     </div>
@@ -738,19 +738,19 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
                 </section>
               )}
 
-              {/* 3. Daily Comments Section: 当日专属全员综合评论区 */}
+              {/* 3. Daily Comments Section: 评论区 */}
               <section className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
                     <MessageSquare className="w-3.5 h-3.5 text-stone-800" />
-                    <span>当日专属全员综合评论区 ({comments.length})</span>
+                    <span>评论区 ({comments.length})</span>
                   </h3>
                 </div>
 
                 {/* Comment list */}
                 {comments.length === 0 ? (
                   <div className="py-6 text-center bg-stone-50 rounded-2xl border border-stone-200 text-xs text-stone-400">
-                    今天还没有人评论，发一条给队友打气吧！
+                    善语结善缘...
                   </div>
                 ) : (
                   <div className="space-y-2.5">
