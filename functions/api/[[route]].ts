@@ -151,7 +151,7 @@ async function ensureTables(db: any) {
       const createdAt = new Date().toISOString();
       await db.prepare(`
         INSERT INTO notification_configs (id, type, name, description, enabled, trigger_time, title_template, content_template, quota_cost_note, created_at)
-        VALUES (?, 'daily_uncheck_reminder', '每日未打卡提醒', '自动检索并推送每日打卡催促通知', 1, '21:00', '⏰ 每日打卡提醒', '您参与的项目今天还没有打卡哦，快去完成吧！', '微信实机督促通道', ?)
+        VALUES (?, 'daily_uncheck_reminder', '每日未打卡提醒', '自动检索并推送每日打卡督促通知', 1, '21:00', '⏰ 每日打卡提醒', '您参与的项目今天还没有打卡哦，快去完成吧！', '微信实机督促通道', ?)
       `).bind(cfgId, createdAt).run();
     }
 
@@ -319,7 +319,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       return jsonResponse({ success: true, serverchanSendKey: sendKey });
     }
 
-    // 5. 微信推送：实机测试微信消息推送
+    // 5. 微信推送：实机测试微信消息推送 (修正 Stray 占位符)
     if (path === '/push/test' && method === 'POST') {
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse({ error: '未登录' }, 401);
@@ -332,12 +332,12 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
         return jsonResponse({ error: '未检测到绑定的 SendKey，请先输入并保存' }, 400);
       }
 
-      const titleMsg = '打卡契约系统测试推送';
+      const titleMsg = '打卡系统测试推送';
       const despMsg = `亲爱的 ${currentUser.nickname}，这是一条来自您打卡系统后台的实机微信推送测试！恭喜您微信绑定配置成功！`;
       const serverChanUrl = `https://sctapi.ftqq.com/${actualKey}.send?title=${encodeURIComponent(titleMsg)}&desp=${encodeURIComponent(despMsg)}`;
 
       try {
-        const pushRes = await fetch(stream_avoid_placeholder_and_fetch_properly_for_serverchan || serverChanUrl);
+        const pushRes = await fetch(serverChanUrl); // 精准修正
         const pushData: any = await pushRes.json().catch(() => ({}));
         const success = pushRes.ok && (pushData.code === 0 || pushData.data?.error === 'SUCCESS' || pushData.errno === 0);
         if (success) {
