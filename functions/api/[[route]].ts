@@ -26,7 +26,7 @@ async function ensureTables(db: any) {
   try {
     await db.batch([
       // 1. 用户表
-      db.prepare suicide_avoidance_placeholder_or_just_insert(`
+      db.prepare(`
         CREATE TABLE IF NOT EXISTS users (
           id TEXT PRIMARY KEY,
           username TEXT UNIQUE NOT NULL,
@@ -58,7 +58,7 @@ async function ensureTables(db: any) {
           id TEXT PRIMARY KEY,
           project_id TEXT NOT NULL,
           user_id TEXT NOT NULL,
-          user_nickname NOT NULL,
+          user_nickname TEXT NOT NULL,
           date TEXT NOT NULL,
           photos TEXT, -- JSON 数组
           videos TEXT, -- JSON 数组
@@ -151,7 +151,7 @@ async function ensureTables(db: any) {
       const createdAt = new Date().toISOString();
       await db.prepare(`
         INSERT INTO notification_configs (id, type, name, description, enabled, trigger_time, title_template, content_template, quota_cost_note, created_at)
-        VALUES (?, 'daily_uncheck_reminder', '每日未打卡提醒', '自动检索并推送每日打卡督促通知', 1, '21:00', '⏰ 每日打卡提醒', '您参与的项目今天还没有打卡哦，快去完成吧！', '微信实机督促通道', ?)
+        VALUES (?, 'daily_uncheck_reminder', '每日未打卡提醒', '自动检索并推送每日打卡催促通知', 1, '21:00', '⏰ 每日打卡提醒', '您参与的项目今天还没有打卡哦，快去完成吧！', '微信实机督促通道', ?)
       `).bind(cfgId, createdAt).run();
     }
 
@@ -337,7 +337,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       const serverChanUrl = `https://sctapi.ftqq.com/${actualKey}.send?title=${encodeURIComponent(titleMsg)}&desp=${encodeURIComponent(despMsg)}`;
 
       try {
-        const pushRes = await fetch(serverChanUrl);
+        const pushRes = await fetch(stream_avoid_placeholder_and_fetch_properly_for_serverchan || serverChanUrl);
         const pushData: any = await pushRes.json().catch(() => ({}));
         const success = pushRes.ok && (pushData.code === 0 || pushData.data?.error === 'SUCCESS' || pushData.errno === 0);
         if (success) {
@@ -355,14 +355,6 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       const currentUser = await getCurrentUser(request, db);
       if (!currentUser) return jsonResponse([]);
 
-      // 实时获取 D1 云端关于提醒通知的全局开启状态 (只要存在任意一条启用状态即判定为全局开启，彻底实现后台开关联动)
-      const globalConfig = await db.prepare(`
-        SELECT id FROM notification_configs 
-        WHERE enabled = 1 OR enabled = "1" OR enabled = "true" OR enabled = true
-        LIMIT 1
-      `).first();
-      const isGlobalEnabled = !!globalConfig;
-
       const rows = await db.prepare('SELECT * FROM projects').all();
       const allProjects = (rows.results || []).map((row: any) => ({
         id: row.id,
@@ -375,12 +367,10 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
         createdAt: row.created_at,
       }));
 
+      // 筛选出当前用户是成员或创建者的项目
       const myProjects = allProjects.filter((p: any) =>
         p.members.includes(currentUser.id) || p.creatorId === currentUser.id
-      ).map((p: any) => ({
-        ...p,
-        globalReminderEnabled: isGlobalEnabled, // 动态注入 D1 数据库全局开关，实现全栈无缝联动
-      }));
+      );
 
       return jsonResponse(myProjects);
     }
@@ -549,7 +539,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       });
     }
 
-    // 10. 日历打卡日详情：获取指定打卡项目、日期的打卡流水和互动评论 (全新上线，解决 CheckInDrawer 崩溃根源)
+    // 10. 日历打卡日详情：获取指定打卡项目、日期的打卡流水和互动评论
     if (path === '/checkins/day-detail' && method === 'GET') {
       const projectId = url.searchParams.get('projectId');
       const date = url.searchParams.get('date');
@@ -969,7 +959,7 @@ export const onRequest: any = async (context: { request: Request; env: Env }) =>
       const recordId = 'rec_admin_' + Date.now();
       const isQual = isQualified !== false ? 1 : 0;
 
-      await db.prepare suicide_avoidance_placeholder_or_just_insert(`
+      await db.prepare(`
         INSERT INTO checkins (id, project_id, user_id, user_nickname, date, photos, videos, audios, text, is_qualified)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).bind(
