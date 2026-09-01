@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronLeft, ChevronRight, Flame, Video, Mic, Camera, FileText } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Video, Mic, Camera, FileText } from 'lucide-react';
 import { CheckInRecord } from '../../types';
 
 interface CalendarGridProps {
@@ -171,7 +171,7 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
             >
               {/* Day header row */}
               <div className="flex items-center justify-between w-full">
-                {/* 今天的高亮圆圈样式：精准更正为数字外层套一个空心小圆圈，保持数字深灰色可读，杜绝黑色实心高亮背景 */}
+                {/* 今天的高亮圆圈样式：更正为日期数字外层精准套一圈空心黑色圆，字色深灰，彻底移除了黑色实心高亮背景 */}
                 <span
                   className={`text-xs font-bold leading-none ${
                     isToday
@@ -203,9 +203,9 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
                 )}
               </div>
 
-              {/* Media Thumbnails & Member Avatars in the cell */}
+              {/* Media Thumbnails Preview in the cell */}
               <div className="mt-1 flex-1 flex flex-col justify-end space-y-1">
-                {/* Photo micro thumbnail preview */}
+                {/* Photo micro thumbnail preview - 已经完全且彻底地将原下方循环渲染的成员头像小气泡模块删除，保证单纯的高清缩略图视觉 */}
                 {allPhotos.length > 0 ? (
                   <div className="flex items-center gap-1 overflow-hidden">
                     <img
@@ -227,28 +227,6 @@ export const CalendarGrid: React.FC<CalendarGridProps> = ({
                       {!hasVideo && !hasAudio && <FileText className="w-3 h-3 text-stone-400" />}
                     </div>
                   )
-                )}
-
-                {/* Micro Avatars of checked in members */}
-                {records.length > 0 && (
-                  <div className="flex items-center -space-x-1 overflow-hidden pt-0.5">
-                    {records.slice(0, 3).map((rec) => (
-                      <img
-                        key={rec.id}
-                        src={rec.userAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'}
-                        alt={rec.userNickname}
-                        title={`${rec.userNickname}: ${rec.isQualified ? '达标' : '未达标'}`}
-                        className={`w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full object-cover border border-white ${
-                          rec.isQualified ? 'ring-1 ring-emerald-500' : 'ring-1 ring-amber-400'
-                        }`}
-                      />
-                    ))}
-                    {records.length > 3 && (
-                      <span className="text-[8px] text-stone-400 pl-1.5 font-bold">
-                        +{records.length - 3}
-                      </span>
-                    )}
-                  </div>
                 )}
               </div>
             </button>
