@@ -114,6 +114,9 @@ export const CalendarView: React.FC = () => {
 
   const activeProject = projects.find((p) => p.id === activeProjectId) || null;
 
+  // 核心改动 1：计算当前登录用户是否是此项目的实际打卡参与成员，控制打卡越权
+  const isMember = activeProject ? activeProject.members.includes(user?.id || '') : false;
+
   return (
     <div className="w-full min-h-screen bg-stone-50/60 pb-24">
       {/* Top Project Navigation Bar - 引入唤醒拉取指令，打开弹窗前自动更新 D1 云端开关，彻底杜绝同步延迟 */}
@@ -178,17 +181,28 @@ export const CalendarView: React.FC = () => {
               </p>
             </div>
 
-            <button
-              id="btn-quick-today-checkin"
-              type="button"
-              onClick={() => {
-                fetchProjects(); // 点击打卡前自动更新 D1 状态
-                setSelectedDateForDrawer(getLocalTodayStr()); // 更正：换用本地时区安全的日期运算，解决清晨无法打卡 Bug
-              }}
-              className="px-4 py-2 bg-stone-900 hover:bg-stone-800 active:scale-95 text-white text-xs font-semibold rounded-xl transition-all shadow-xs"
-            >
-              今日打卡
-            </button>
+            {/* 核心改动 2：只有当用户本身确实是打卡项目参与成员（isMember）时，才渲染“今日打卡”按钮，否则直接无迹隐藏 */}
+            {isMember && (
+              <button
+                id="btn-quick-today-checkin"
+                type="button"
+                onClick={() => {
+                  fetchProjects(); // 点击打卡前自动更新 D1 状态
+                  
+                  // 核心修复：采用本地安全时间戳计算，解决清晨点击打卡直接判定到昨天的时区差缺陷
+                  const today = new Date();
+                  const tYear = today.getFullYear();
+                  const tMonth = today.getMonth() + 1;
+                  const tDay = today.getDate();
+                  const localTodayStr = `${tYear}-${tMonth < 10 ? '0' + tMonth : tMonth}-${tDay < 10 ? '0' + tDay : tDay}`;
+                  
+                  setSelectedDateForDrawer(localTodayStr);
+                }}
+                className="px-4 py-2 bg-stone-900 hover:bg-stone-800 active:scale-95 text-white text-xs font-semibold rounded-xl transition-all shadow-xs"
+              >
+                今日打卡
+              </button>
+            )}
           </div>
         )}
 
