@@ -62,7 +62,7 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
   // Photo viewer lightbox
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
-  // 核心改动 1：智能 HD 高清无损压缩算法，肉眼完美保真，体积骤降 90%，防止大图撑爆 D1 锁表
+  // 核心改动 1：智能 HD 高清无损压缩算法，肉眼保真，体积骤降 90%，防止大图解开时撑爆 D1 锁表
   const compressImage = (base64Str: string): Promise<string> => {
     return new Promise<string>((resolve) => {
       const img = new Image();
@@ -92,7 +92,7 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
         canvas.width = width;
         canvas.height = height;
         ctx?.drawImage(img, 0, 0, width, height);
-        // 采用 88% 的高保真系数进行 JPEG 压缩，肉眼完全无失真，体积骤降
+        // 采用 88% 的高保真系数进行 JPEG 压缩，肉眼无失真，体积骤降
         const compressedBase64 = canvas.toDataURL('image/jpeg', 0.88);
         resolve(compressedBase64);
       };
@@ -149,7 +149,7 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
   const meetsTextRule = !rules.requireText || text.trim().length > 0;
   const isFormQualified = meetsPhotoRule && meetsVideoRule && meetsAudioRule && meetsTextRule;
 
-  // 客户端当日打卡截止与防作弊拦截判定 (本地时间 24:00 截止，管理员具有最高权限不受限制)
+  // 客户端当日打卡截止与防抢跑判定 (本地时间 24:00 截止，管理员具有最高权限不受限制)
   const today = new Date();
   const year = today.getFullYear();
   const month = today.getMonth() + 1;
@@ -161,6 +161,9 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
   const isFuture = dateStr > localTodayStr;
   const isAdmin = user?.isAdmin || user?.role === 'admin';
   const canSubmit = isToday || isAdmin;
+
+  // 核心改动 1：计算当前登录用户是否是此项目的打卡参与成员，用来做按钮及填写表单的越权强控
+  const isMember = project.members.includes(user?.id || '');
 
   // Handle Photo selection (融入 HD 压缩)
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -466,291 +469,295 @@ export const CheckInDrawer: React.FC<CheckInDrawerProps> = ({
                 )}
               </section>
 
-              {/* 2. My Check-in Action Zone - 只有在可以打卡或者用户是管理员时才展示可填写表单 */}
-              {!canSubmit ? (
-                <div className="p-4 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-2xl flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                  <span>
-                    {isPast 
-                      ? '⚠️ 已过打卡截止时间（每日打卡截止至当天 24:00），普通成员无法进行补打卡。' 
-                      : '⚠️ 无法为未来的日期进行预先打卡。'}
-                  </span>
-                </div>
-              ) : (
-                <section className="bg-stone-50 rounded-2xl border border-stone-200 p-5 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
-                      <Flame className="w-3.5 h-3.5 text-orange-500" />
+              {/* 2. My Check-in Action Zone - 核心改动：只有当用户本身确实是该项目的打卡参与成员（isMember）时，才显示此提交和打卡区域，完美阻断非打卡成员越权提交 */}
+              {isMember && (
+                <>
+                  {!canSubmit ? (
+                    <div className="p-4 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-2xl flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
                       <span>
-                        {records.some((r) => r.userId === user?.id) ? '修改我的打卡' : '提交今日打卡'}
+                        {isPast 
+                          ? '⚠️ 已过打卡截止时间（每日打卡截止至当天 24:00），普通成员无法进行补打卡。' 
+                          : '⚠️ 无法为未来的日期进行预先打卡。'}
                       </span>
-                    </h3>
-                    <span
-                      className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
-                        isFormQualified
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-amber-100 text-amber-800'
-                      }`}
-                    >
-                      {isFormQualified ? '已满足达标条件' : '待满足所有要求'}
-                    </span>
-                  </div>
-
-                  {/* Rule requirement list */}
-                  <div className="bg-white p-3 rounded-xl border border-stone-200 space-y-1.5 text-xs text-stone-600">
-                    <div className="font-semibold text-stone-800 text-[11px] mb-1">
-                      当前打卡达标要求：
                     </div>
-                    {rules.requirePhotos && (
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={
-                            photos.length >= (rules.minPhotos || 1)
-                              ? 'text-emerald-600 font-bold'
-                              : 'text-amber-600'
-                          }
-                        >
-                          {photos.length >= (rules.minPhotos || 1) ? '✓' : '○'} 照片：需上传至少 {rules.minPhotos || 1} 张 (当前 {photos.length} 张)
-                        </span>
-                      </div>
-                    )}
-                    {rules.requireVideo && (
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={
-                            videos.length > 0
-                              ? 'text-emerald-600 font-bold'
-                              : 'text-amber-600'
-                          }
-                        >
-                          {videos.length > 0 ? '✓' : '○'} 视频：需上传视频 (当前 {videos.length} 个)
-                        </span>
-                      </div>
-                    )}
-                    {rules.requireAudio && (
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={
-                            audios.length > 0
-                              ? 'text-emerald-600 font-bold'
-                              : 'text-amber-600'
-                          }
-                        >
-                          {audios.length > 0 ? '✓' : '○'} 语音：需录制语音 (当前 {audios.length} 条)
-                        </span>
-                      </div>
-                    )}
-                    {rules.requireText && (
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={
-                            text.trim().length > 0
-                              ? 'text-emerald-600 font-bold'
-                              : 'text-amber-600'
-                          }
-                        >
-                          {text.trim().length > 0 ? '✓' : '○'} 文字说明：必填
-                        </span>
-                      </div>
-                    )}
-                    {rules.note && (
-                      <div className="text-stone-400 text-[10px] pt-1">
-                        备注：{rules.note}
-                      </div>
-                    )}
-                    
-                    {/* 微信每日督促显示：加入 D1 数据库全局 enabled 开关强同步联动 */}
-                    {project.globalReminderEnabled !== false && (rules.reminderEnabled ?? project.reminderEnabled) && (
-                      <div className="text-emerald-700 font-medium text-[11px] pt-1 flex items-center gap-1 border-t border-stone-100">
-                        <span>⏰ 微信每日催促已开启 ({rules.reminderTime || project.reminderTime || '21:00'})</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {submitError && (
-                    <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">
-                      {submitError}
-                    </div>
-                  )}
-                  {submitSuccess && (
-                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl">
-                      {submitSuccess}
-                    </div>
-                  )}
-
-                  <form onSubmit={handleSubmitCheckIn} className="space-y-4">
-                    {/* Photo picker & preview */}
-                    <div>
-                      <label className="block text-xs font-semibold text-stone-700 mb-1.5 flex items-center justify-between">
-                        <span className="flex items-center gap-1">
-                          <Camera className="w-3.5 h-3.5" />
-                          <span>拍照 / 选图 ({photos.length} 张)</span>
-                        </span>
-                        <label
-                          htmlFor="input-photo-upload"
-                          className="cursor-pointer text-[11px] text-stone-900 hover:underline font-semibold"
-                        >
-                          + 添加图片
-                        </label>
-                      </label>
-                      <input
-                        id="input-photo-upload"
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        onChange={handlePhotoUpload}
-                        className="hidden"
-                      />
-
-                      {photos.length > 0 && (
-                        <div className="grid grid-cols-4 gap-2 pt-1">
-                          {photos.map((p, idx) => (
-                            <div
-                              key={idx}
-                              className="aspect-square relative rounded-xl overflow-hidden border border-stone-200 group"
-                            >
-                              <img src={p} alt="" className="w-full h-full object-cover" />
-                              <button
-                                type="button"
-                                onClick={() => setPhotos((prev) => prev.filter((_, i) => i !== idx))}
-                                className="absolute top-1 right-1 p-1 bg-black/60 text-white rounded-md opacity-90 hover:bg-red-600 transition-colors"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Video picker & preview */}
-                    <div>
-                      <label className="block text-xs font-semibold text-stone-700 mb-1.5 flex items-center justify-between">
-                        <span className="flex items-center gap-1">
-                          <Video className="w-3.5 h-3.5" />
-                          <span>上传视频 ({videos.length})</span>
-                        </span>
-                        <label
-                          htmlFor="input-video-upload"
-                          className="cursor-pointer text-[11px] text-stone-900 hover:underline font-semibold"
-                        >
-                          + 选择视频
-                        </label>
-                      </label>
-                      <input
-                        id="input-video-upload"
-                        type="file"
-                        accept="video/*"
-                        onChange={handleVideoUpload}
-                        className="hidden"
-                      />
-                      {videos.length > 0 && (
-                        <div className="space-y-1 pt-1">
-                          {videos.map((v, idx) => (
-                            <div
-                              key={idx}
-                              className="flex items-center justify-between p-2 bg-white rounded-xl border border-stone-200 text-xs"
-                            >
-                              <span className="text-stone-700 truncate max-w-[200px]">
-                                已选择视频文件 ({idx + 1})
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setVideos((prev) => prev.filter((_, i) => i !== idx))}
-                                className="text-stone-400 hover:text-red-600"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Voice recording */}
-                    <div>
-                      <label className="block text-xs font-semibold text-stone-700 mb-1.5 flex items-center gap-1">
-                        <Mic className="w-3.5 h-3.5" />
-                        <span>录音打卡</span>
-                      </label>
-                      <VoiceRecorder
-                        onRecordingComplete={(audioUrl, duration) => {
-                          setAudios((prev) => [...prev, { url: audioUrl, duration }]);
-                        }}
-                      />
-                      {audios.length > 0 && (
-                        <div className="space-y-1.5 pt-2">
-                          {audios.map((aud, idx) => (
-                            <div
-                              key={idx}
-                              className="flex items-center justify-between p-2 bg-white rounded-xl border border-stone-200 text-xs"
-                            >
-                              <span className="text-stone-700">
-                                录音 #{idx + 1} ({aud.duration}秒)
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setAudios((prev) => prev.filter((_, i) => i !== idx))}
-                                className="text-stone-400 hover:text-red-600"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Text Note */}
-                    <div>
-                      <label className="block text-xs font-semibold text-stone-700 mb-1.5 flex items-center gap-1">
-                        <FileText className="w-3.5 h-3.5" />
-                        <span>打卡文字说明</span>
-                      </label>
-                      <textarea
-                        id="input-checkin-text"
-                        rows={2}
-                        value={text}
-                        onChange={(e) => setText(e.target.value)}
-                        placeholder="写点什么..."
-                        className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-stone-900 text-xs focus:outline-none focus:ring-2 focus:ring-stone-900"
-                      />
-                    </div>
-
-                    <button
-                      id="btn-submit-checkin"
-                      type="submit"
-                      disabled={submitting}
-                      className="w-full py-3 bg-stone-900 hover:bg-stone-800 active:scale-[0.99] text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
-                    >
-                      {submitting ? (
-                        '提交中...'
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-4 h-4" />
+                  ) : (
+                    <section className="bg-stone-50 rounded-2xl border border-stone-200 p-5 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
+                          <Flame className="w-3.5 h-3.5 text-orange-500" />
                           <span>
-                            {records.some((r) => r.userId === user?.id) ? '更新打卡并核算火花' : '提交打卡并核算火花'}
+                            {records.some((r) => r.userId === user?.id) ? '修改我的打卡' : '提交今日打卡'}
                           </span>
-                        </>
+                        </h3>
+                        <span
+                          className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${
+                            isFormQualified
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {isFormQualified ? '已满足达标条件' : '待满足所有要求'}
+                        </span>
+                      </div>
+
+                      {/* Rule requirement list */}
+                      <div className="bg-white p-3 rounded-xl border border-stone-200 space-y-1.5 text-xs text-stone-600">
+                        <div className="font-semibold text-stone-800 text-[11px] mb-1">
+                          当前打卡达标要求：
+                        </div>
+                        {rules.requirePhotos && (
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={
+                                photos.length >= (rules.minPhotos || 1)
+                                  ? 'text-emerald-600 font-bold'
+                                  : 'text-amber-600'
+                              }
+                            >
+                              {photos.length >= (rules.minPhotos || 1) ? '✓' : '○'} 照片：需上传至少 {rules.minPhotos || 1} 张 (当前 {photos.length} 张)
+                            </span>
+                          </div>
+                        )}
+                        {rules.requireVideo && (
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={
+                                videos.length > 0
+                                  ? 'text-emerald-600 font-bold'
+                                  : 'text-amber-600'
+                              }
+                            >
+                              {videos.length > 0 ? '✓' : '○'} 视频：需上传视频 (当前 {videos.length} 个)
+                            </span>
+                          </div>
+                        )}
+                        {rules.requireAudio && (
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={
+                                audios.length > 0
+                                  ? 'text-emerald-600 font-bold'
+                                  : 'text-amber-600'
+                              }
+                            >
+                              {audios.length > 0 ? '✓' : '○'} 语音：需录制语音 (当前 {audios.length} 条)
+                            </span>
+                          </div>
+                        )}
+                        {rules.requireText && (
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={
+                                text.trim().length > 0
+                                  ? 'text-emerald-600 font-bold'
+                                  : 'text-amber-600'
+                              }
+                            >
+                              {text.trim().length > 0 ? '✓' : '○'} 文字说明：必填
+                            </span>
+                          </div>
+                        )}
+                        {rules.note && (
+                          <div className="text-stone-400 text-[10px] pt-1">
+                            备注：{rules.note}
+                          </div>
+                        )}
+                        
+                        {/* 微信每日督促显示：加入 D1 数据库全局 enabled 开关强同步联动 */}
+                        {project.globalReminderEnabled !== false && (rules.reminderEnabled ?? project.reminderEnabled) && (
+                          <div className="text-emerald-700 font-medium text-[11px] pt-1 flex items-center gap-1 border-t border-stone-100">
+                            <span>⏰ 微信每日催促已开启 ({rules.reminderTime || project.reminderTime || '21:00'})</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {submitError && (
+                        <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl">
+                          {submitError}
+                        </div>
                       )}
-                    </button>
-                  </form>
-                </section>
+                      {submitSuccess && (
+                        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl">
+                          {submitSuccess}
+                        </div>
+                      )}
+
+                      <form onSubmit={handleSubmitCheckIn} className="space-y-4">
+                        {/* Photo picker & preview */}
+                        <div>
+                          <label className="block text-xs font-semibold text-stone-700 mb-1.5 flex items-center justify-between">
+                            <span className="flex items-center gap-1">
+                              <Camera className="w-3.5 h-3.5" />
+                              <span>拍照 / 选图 ({photos.length} 张)</span>
+                            </span>
+                            <label
+                              htmlFor="input-photo-upload"
+                              className="cursor-pointer text-[11px] text-stone-900 hover:underline font-semibold"
+                            >
+                              + 添加图片
+                            </label>
+                          </label>
+                          <input
+                            id="input-photo-upload"
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={handlePhotoUpload}
+                            className="hidden"
+                          />
+
+                          {photos.length > 0 && (
+                            <div className="grid grid-cols-4 gap-2 pt-1">
+                              {photos.map((p, idx) => (
+                                <div
+                                  key={idx}
+                                  className="aspect-square relative rounded-xl overflow-hidden border border-stone-200 group"
+                                >
+                                  <img src={p} alt="" className="w-full h-full object-cover" />
+                                  <button
+                                    type="button"
+                                    onClick={() => setPhotos((prev) => prev.filter((_, i) => i !== idx))}
+                                    className="absolute top-1 right-1 p-1 bg-black/60 text-white rounded-md opacity-90 hover:bg-red-600 transition-colors"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Video picker & preview */}
+                        <div>
+                          <label className="block text-xs font-semibold text-stone-700 mb-1.5 flex items-center justify-between">
+                            <span className="flex items-center gap-1">
+                              <Video className="w-3.5 h-3.5" />
+                              <span>上传视频 ({videos.length})</span>
+                            </span>
+                            <label
+                              htmlFor="input-video-upload"
+                              className="cursor-pointer text-[11px] text-stone-900 hover:underline font-semibold"
+                            >
+                              + 选择视频
+                            </label>
+                          </label>
+                          <input
+                            id="input-video-upload"
+                            type="file"
+                            accept="video/*"
+                            onChange={handleVideoUpload}
+                            className="hidden"
+                          />
+                          {videos.length > 0 && (
+                            <div className="space-y-1 pt-1">
+                              {videos.map((v, idx) => (
+                                <div
+                                  key={idx}
+                                  className="flex items-center justify-between p-2 bg-white rounded-xl border border-stone-200 text-xs"
+                                >
+                                  <span className="text-stone-700 truncate max-w-[200px]">
+                                    已选择视频文件 ({idx + 1})
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setVideos((prev) => prev.filter((_, i) => i !== idx))}
+                                    className="text-stone-400 hover:text-red-600"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Voice recording */}
+                        <div>
+                          <label className="block text-xs font-semibold text-stone-700 mb-1.5 flex items-center gap-1">
+                            <Mic className="w-3.5 h-3.5" />
+                            <span>录音打卡</span>
+                          </label>
+                          <VoiceRecorder
+                            onRecordingComplete={(audioUrl, duration) => {
+                              setAudios((prev) => [...prev, { url: audioUrl, duration }]);
+                            }}
+                          />
+                          {audios.length > 0 && (
+                            <div className="space-y-1.5 pt-2">
+                              {audios.map((aud, idx) => (
+                                <div
+                                  key={idx}
+                                  className="flex items-center justify-between p-2 bg-white rounded-xl border border-stone-200 text-xs"
+                                >
+                                  <span className="text-stone-700">
+                                    录音 #{idx + 1} ({aud.duration}秒)
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setAudios((prev) => prev.filter((_, i) => i !== idx))}
+                                    className="text-stone-400 hover:text-red-600"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Text Note */}
+                        <div>
+                          <label className="block text-xs font-semibold text-stone-700 mb-1.5 flex items-center gap-1">
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>打卡文字说明 / 心得</span>
+                          </label>
+                          <textarea
+                            id="input-checkin-text"
+                            rows={2}
+                            value={text}
+                            onChange={(e) => setText(e.target.value)}
+                            placeholder="写下今天的打卡体会..."
+                            className="w-full px-3 py-2 bg-white border border-stone-200 rounded-xl text-stone-900 text-xs focus:outline-none focus:ring-2 focus:ring-stone-900"
+                          />
+                        </div>
+
+                        <button
+                          id="btn-submit-checkin"
+                          type="submit"
+                          disabled={submitting}
+                          className="w-full py-3 bg-stone-900 hover:bg-stone-800 active:scale-[0.99] text-white text-xs font-semibold rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                        >
+                          {submitting ? (
+                            '提交中...'
+                          ) : (
+                            <>
+                              <CheckCircle2 className="w-4 h-4" />
+                              <span>
+                                {records.some((r) => r.userId === user?.id) ? '更新打卡并核算火花' : '提交打卡并核算火花'}
+                              </span>
+                            </>
+                          )}
+                        </button>
+                      </form>
+                    </section>
+                  )}
+                </>
               )}
 
-              {/* 3. Daily Comments Section: 评论区 */}
+              {/* 3. Daily Comments Section: 当日专属全员综合评论区 */}
               <section className="space-y-3 pt-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
                     <MessageSquare className="w-3.5 h-3.5 text-stone-800" />
-                    <span>评论区 ({comments.length})</span>
+                    <span>当日专属全员综合评论区 ({comments.length})</span>
                   </h3>
                 </div>
 
                 {/* Comment list */}
                 {comments.length === 0 ? (
                   <div className="py-6 text-center bg-stone-50 rounded-2xl border border-stone-200 text-xs text-stone-400">
-                    善语结善缘...
+                    今天还没有人评论，发一条给队友打气吧！
                   </div>
                 ) : (
                   <div className="space-y-2.5">
