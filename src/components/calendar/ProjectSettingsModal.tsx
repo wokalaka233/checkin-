@@ -128,6 +128,27 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
   // Friends not currently in members
   const availableFriends = friends.filter((f) => !project.members.includes(f.id));
 
+  // 核心改动 1：重构并置顶创建者名单（不论其是否参与打卡一律置顶，普通成员排在其后）
+  const activeMembers = project.memberUsers || [];
+  const isCreatorInMembers = activeMembers.some(m => m.id === project.creatorId);
+
+  // 如果创建者勾选不参与，则在前端手动组装出一个带有“(创建者)”标识的监督员卡片，确保第一位永远是创建者
+  const creatorUser: any = isCreatorInMembers 
+    ? activeMembers.find(m => m.id === project.creatorId)
+    : {
+        id: project.creatorId,
+        username: project.creatorId === user?.id ? user?.username : 'creator',
+        nickname: project.creatorNickname || '项目创建者',
+        avatar: project.creatorId === user?.id ? user?.avatar : `https://api.dicebear.com/7.x/avataaars/svg?seed=${project.creatorId}`,
+        isCreatorOnly: true, // 标识仅作为创建者/监督员，不参与打卡
+      };
+
+  // 合并排序：创建者排在第一位，其余成员排在后
+  const orderedList = [
+    creatorUser, 
+    ...activeMembers.filter(m => m.id !== project.creatorId)
+  ].filter(Boolean);
+
   return (
     <div
       id="project-settings-modal-backdrop"
@@ -140,8 +161,13 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
         <div className="flex items-center justify-between px-6 py-4 border-b border-stone-100">
           <div>
             <h2 className="text-base font-bold text-stone-900">{project.title}</h2>
-            <p className="text-[11px] text-stone-500">
-              创建者: {project.creatorNickname || '我'} · 共 {project.members.length} 位成员
+            {/* 核心改动 2：将“共几位成员”文本重构为可点击链接，点击后自动、平滑地在前端切换到“成员与重燃管理”标签页 */}
+            <p 
+              onClick={() => setActiveTab('members')}
+              className="text-[11px] text-stone-500 mt-0.5 cursor-pointer hover:underline hover:text-stone-800 transition-colors"
+              title="点击查看成员名单"
+            >
+              创建者: {project.creatorNickname || '我'} · 共 <span className="font-bold text-stone-700 underline">{project.members.length}</span> 位成员
             </p>
           </div>
           <button
@@ -384,7 +410,8 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
                   当前打卡成员 ({project.members.length} 人)
                 </div>
                 <div className="space-y-2">
-                  {project.memberUsers?.map((member) => {
+                  {/* 核心改动 3：使用有序的 orderedList 进行渲染，让创建者永远排在第一位置顶 */}
+                  {orderedList.map((member: any) => {
                     const sparks = project.sparks[member.id] || 0;
                     const isSelf = member.id === user?.id;
                     const isProjectCreator = member.id === project.creatorId;
@@ -404,27 +431,30 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
                             <div className="text-xs font-semibold text-stone-900 flex items-center gap-1">
                               <span>{member.nickname}</span>
                               {isProjectCreator && (
-                                <span className="px-1.5 py-0.2 bg-stone-200 text-stone-700 text-[10px] rounded">
-                                  创建者
+                                <span className="px-1.5 py-0.2 bg-stone-900 text-white text-[10px] rounded font-bold">
+                                  创建者 {member.isCreatorOnly ? '(监督员)' : ''}
                                 </span>
                               )}
-                              {isSelf && (
-                                <span className="px-1.5 py-0.2 bg-stone-900 text-white text-[10px] rounded">
+                              {isSelf && !member.isCreatorOnly && (
+                                <span className="px-1.5 py-0.2 bg-stone-250 text-stone-700 text-[10px] rounded">
                                   我
                                 </span>
                               )}
                             </div>
                             <div className="text-[10px] text-stone-500">
-                              @{member.username}
+                              {member.username ? `@${member.username}` : '打卡成员'}
                             </div>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-2">
-                          <div className="flex items-center gap-1 px-2 py-0.5 bg-orange-100 text-orange-800 rounded-lg text-xs font-bold">
-                            <Flame className="w-3 h-3 fill-current text-orange-600" />
-                            <span>{sparks}天</span>
-                          </div>
+                          {/* 只有在成员实际参与打卡时，才展现火苗天数，监督员不展现火苗 */}
+                          {!member.isCreatorOnly && (
+                            <div className="flex items-center gap-1 px-2 py-0.5 bg-orange-100 text-orange-800 rounded-lg text-xs font-bold">
+                              <Flame className="w-3 h-3 fill-current text-orange-600" />
+                              <span>{sparks}天</span>
+                            </div>
+                          )}
 
                           {isCreator && !isProjectCreator && (
                             <button
